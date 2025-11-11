@@ -1,0 +1,480 @@
+/* Joystick Viewer Specific Styles */
+
+.viewer-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    background-color: var(--bg-darkest);
+    position: relative;
+    z-index: 1;
+}
+
+.joystick-display {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    position: relative;
+    overflow: visible;
+}
+
+.welcome-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+}
+
+.canvas-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+
+#viewer-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Floating Control Toolbar */
+.viewer-controls {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    background: rgba(20, 24, 28, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+}
+
+.control-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.control-divider {
+    width: 1px;
+    height: 28px;
+    background: #444;
+    margin: 0 0.25rem;
+}
+
+.control-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(40, 44, 48, 0.7);
+    border: 1px solid #555;
+    border-radius: 5px;
+    color: #ccc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.control-btn:hover {
+    background: rgba(50, 54, 58, 0.9);
+    border-color: #666;
+    color: #fff;
+}
+
+.control-btn.active {
+    background: rgba(78, 201, 176, 0.2);
+    border-color: #4ec9b0;
+    color: #4ec9b0;
+}
+
+.control-icon {
+    font-size: 1rem;
+    display: inline-block;
+}
+
+/* Wide Modal */
+.wide-modal {
+    max-width: 900px;
+    width: 90%;
+}
+
+/* Template Grid */
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.template-card {
+    background-color: var(--bg-medium);
+    border: 2px solid var(--bg-light);
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.template-card:hover {
+    border-color: var(--accent-primary);
+    background-color: var(--bg-light);
+}
+
+.template-card-image {
+    width: 100%;
+    height: 150px;
+    background-color: var(--bg-dark);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.template-card-image img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.template-card-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.template-card-model {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.template-card-info {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.control-group {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.control-divider {
+    width: 1px;
+    height: 30px;
+    background: #444;
+    margin: 0 0.25rem;
+}
+
+.control-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(40, 44, 48, 0.6);
+    border: 1px solid #555;
+    border-radius: 6px;
+    color: #ccc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 60px;
+}
+
+.control-btn:hover {
+    background: rgba(50, 54, 58, 0.8);
+    border-color: #666;
+    color: #fff;
+}
+
+.control-btn.active {
+    background: rgba(78, 201, 176, 0.2);
+    border-color: #4ec9b0;
+    color: #4ec9b0;
+}
+
+.control-icon {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.control-btn span:not(.control-icon) {
+    font-size: 0.7rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+/* Stick Selector */
+.stick-selector {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.stick-selector .control-btn {
+    min-width: 55px;
+}
+
+/* Empty state for templates */
+.template-empty {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-secondary);
+    grid-column: 1 / -1;
+}
+
+.template-empty p {
+    margin-bottom: 1rem;
+}
+
+/* Binding Info Panel */
+.binding-info-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    border: 2px solid #343a42;
+    border-radius: 8px;
+    padding: 0;
+    min-width: 280px;
+    max-width: 400px;
+    max-height: 60vh;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    display: none;
+}
+
+.binding-info-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: rgb(22 26 31);
+    border-bottom: 1px solid #343a42;
+}
+
+.binding-info-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #d9534f;
+    font-weight: 600;
+}
+
+.binding-info-close {
+    background: none;
+    border: none;
+    color: #d9534f;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.binding-info-close:hover {
+    background-color: rgba(217, 83, 79, 0.2);
+}
+
+.binding-info-details {
+    padding: 0.5rem 1rem;
+    background: #1a1e24;
+    border-bottom: 1px solid #343a42;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.binding-info-id {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.binding-info-id code {
+    background: var(--bg-dark);
+    color: #4ec9b0;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9em;
+}
+
+.binding-info-content {
+    padding: 0.5rem;
+    max-height: calc(60vh - 60px);
+    overflow-y: auto;
+    background: #161a1f;
+}
+
+.binding-info-item {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: rgba(30, 30, 30, 0.6);
+    border-left: 3px solid #4ec9b0;
+    border-radius: 4px;
+}
+
+.binding-info-item:last-child {
+    margin-bottom: 0;
+}
+
+.binding-info-action {
+    font-weight: 600;
+    color: #4ec9b0;
+    font-size: 0.95rem;
+    margin-bottom: 0.25rem;
+}
+
+.binding-info-category {
+    font-size: 0.8rem;
+    color: #888;
+    font-style: italic;
+}
+
+/* Modifier Filter Toolbar */
+.modifier-toolbar {
+    position: absolute;
+    bottom: 1rem;
+    /* left: 50%;
+    transform: translateX(-50%); */
+    left: 1rem;
+    background: rgba(20, 24, 28, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+}
+
+.toolbar-label {
+    font-size: 0.85rem;
+    color: #aaa;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.modifier-options {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.modifier-radio {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 0.35rem 0.65rem;
+    background: rgba(40, 44, 48, 0.6);
+    border: 1px solid #555;
+    border-radius: 5px;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.modifier-radio:hover {
+    background: rgba(50, 54, 58, 0.8);
+    border-color: #666;
+}
+
+.modifier-radio input[type="radio"] {
+    display: none;
+}
+
+.modifier-radio input[type="radio"]:checked+span {
+    color: #4ec9b0;
+    font-weight: 600;
+}
+
+.modifier-radio input[type="radio"]:checked~* {
+    color: #4ec9b0;
+}
+
+.modifier-radio:has(input[type="radio"]:checked) {
+    background: rgba(78, 201, 176, 0.15);
+    border-color: #4ec9b0;
+}
+
+.modifier-radio span {
+    font-size: 0.8rem;
+    color: #ccc;
+    transition: color 0.2s ease;
+    white-space: nowrap;
+}
+
+/* Export Notification */
+.export-notification {
+    position: fixed;
+    top: 5rem;
+    right: 2rem;
+    background: rgba(78, 201, 176, 0.95);
+    color: #0f1215;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    box-shadow: 0 4px 20px rgba(78, 201, 176, 0.4);
+    z-index: 10000;
+    animation: slideIn 0.3s ease;
+}
+
+.export-notification.fade-out {
+    animation: fadeOut 0.3s ease;
+    opacity: 0;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}

@@ -1,0 +1,405 @@
+/* Template Editor Specific Styles */
+
+.editor-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.editor-sidebar {
+    width: 320px;
+    background-color: var(--bg-dark);
+    border-right: 1px solid var(--bg-light);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.editor-sidebar .section {
+    padding: 1rem;
+    border: 1px solid var(--bg-lightest);
+    background: var(--bg-light);
+    margin: 1rem;
+    border-radius: 6px;
+}
+
+.editor-sidebar h3 {
+    margin: -1rem -1rem 6px -1rem;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    background: var(--bg-darkest);
+    padding: 0.5rem 0.5rem 0.5rem 15px;
+    border-radius: 6px 6px 0 0;
+}
+
+.editor-sidebar label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.editor-sidebar input[type="text"] {
+    width: 100%;
+}
+
+.btn-block {
+    width: 100%;
+    text-align: center;
+}
+
+.btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+.btn-danger {
+    background-color: #c74444;
+    color: white;
+    border-color: #c74444;
+}
+
+.btn-danger:hover {
+    background-color: #d9534f;
+    border-color: #d9534f;
+}
+
+.info-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+/* Button List */
+.button-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 0.75rem;
+}
+
+.button-item {
+    padding: 0.75rem;
+    background-color: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.button-item:hover {
+    background-color: var(--bg-light);
+    border-color: var(--accent-primary);
+}
+
+.button-item.selected {
+    border-color: var(--accent-primary);
+    background-color: var(--bg-light);
+}
+
+.button-item-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.button-item-coords {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.empty-state-small {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* Instructions */
+.instructions {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.instructions p {
+    margin: 0.5rem 0;
+}
+
+.instructions strong {
+    color: var(--text-primary);
+}
+
+.instructions ol,
+.instructions ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+}
+
+.instructions li {
+    margin: 0.25rem 0;
+}
+
+/* Editor Panel */
+.editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: var(--bg-darkest);
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+}
+
+.canvas-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background-color: var(--bg-darkest);
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+    min-height: 0;
+    min-width: 0;
+}
+
+#editor-canvas {
+    display: block;
+    cursor: crosshair;
+    image-rendering: high-quality;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.canvas-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    background: rgba(12, 15, 17, 0.8);
+}
+
+.canvas-overlay.hidden {
+    display: none;
+}
+
+.welcome-message {
+    text-align: center;
+    padding: 2rem;
+}
+
+.welcome-message h2 {
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.welcome-message p {
+    color: var(--text-muted);
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    background-color: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 4px;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+}
+
+/* Edit Controls - Floating toolbar for Add/Delete buttons */
+.edit-controls {
+    position: absolute;
+    bottom: 1rem;
+    left: 1rem;
+    background-color: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 4px;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+}
+
+.edit-controls .btn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+    min-width: auto;
+}
+
+.edit-controls .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    background-color: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    background-color: var(--bg-light);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+#zoom-level {
+    min-width: 50px;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+/* Stick Selector */
+.stick-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-right: 1rem;
+}
+
+.stick-selector .btn {
+    min-width: 100px;
+}
+
+.stick-selector .btn.active {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: white;
+}
+
+/* Joystick Number Picker */
+.joystick-number-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: 1.5rem;
+    padding: 0 1rem;
+    border-left: 1px solid var(--bg-light);
+    border-right: 1px solid var(--bg-light);
+}
+
+.joystick-number-picker label {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.joystick-number-picker select {
+    padding: 0.5rem 0.75rem;
+    background-color: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-width: 150px;
+}
+
+.joystick-number-picker select:hover {
+    border-color: var(--accent-primary);
+}
+
+.joystick-number-picker select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(52, 168, 224, 0.1);
+}
+
+.joystick-number-value {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+    background-color: var(--bg-medium);
+    padding: 0.3rem 0.6rem;
+    border-radius: 3px;
+    min-width: 35px;
+    text-align: center;
+}
+
+/* Canvas Drawing Styles */
+.handle {
+    fill: var(--accent-primary);
+    stroke: white;
+    stroke-width: 2;
+    cursor: move;
+}
+
+.handle:hover {
+    fill: var(--accent-hover);
+}
+
+.connection-line {
+    stroke: var(--accent-primary);
+    stroke-width: 2;
+    stroke-dasharray: 5, 5;
+}
+
+.label-box {
+    fill: var(--bg-dark);
+    stroke: var(--accent-primary);
+    stroke-width: 2;
+}
+
+.label-text {
+    fill: var(--text-primary);
+    font-family: 'Segoe UI', 'Roboto', sans-serif;
+    font-size: 14px;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+}
+
+/* Highlight Animation */
+@keyframes highlightPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(52, 168, 224, 0.7);
+        background-color: var(--bg-secondary);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px rgba(52, 168, 224, 0);
+        background-color: rgba(52, 168, 224, 0.15);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(52, 168, 224, 0);
+        background-color: var(--bg-secondary);
+    }
+}
+
+.highlight-pulse {
+    animation: highlightPulse 1s ease-in-out 3;
+    border-color: var(--accent-primary) !important;
+}

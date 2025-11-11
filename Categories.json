@@ -1,0 +1,55 @@
+{
+    "categories": [
+        {
+            "@ui_CCSeatGeneral": "General Seat Controls"
+        },
+        {
+            "@ui_CCSpaceFlight": "Space Flight Controls"
+        },
+        {
+            "@ui_CCOrientationControl": "Orientation Control"
+        },
+        {
+            "@ui_CCFlightModes": "Flight Modes"
+        },
+        {
+            "@ui_CCTurrets": "Turrets"
+        },
+        {
+            "@ui_CGLightControllerDesc": "Light Controller"
+        },
+        {
+            "@ui_CCFPS": "First Person Shooter Controls"
+        },
+        {
+            "@ui_CCEVA": "EVA Controls"
+        },
+        {
+            "@ui_CCEVAZGT": "EVA Zero Gravity Traversal"
+        },
+        {
+            "@ui_CCVehicle": "Vehicle Controls"
+        },
+        {
+            "@ui_CC_DriveModes": "Drive Modes"
+        },
+        {
+            "@ui_CGEASpectator": "Spectator Mode"
+        },
+        {
+            "@ui_CGUIGeneral": "General UI Controls"
+        },
+        {
+            "@ui_CGOpticalTracking": "Optical Tracking"
+        },
+        {
+            "@ui_CGInteraction": "Interaction"
+        },
+        {
+            "@ui_CCCamera": "Camera Controls"
+        },
+        {
+            "": "Uncategorized"
+        }
+    ]
+}

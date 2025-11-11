@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Star Citizen Directory - SC Joystick Mapper</title>
+    <style>
+        .directory-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .directory-header {
+            margin-bottom: 2rem;
+        }
+
+        .directory-header h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 2rem;
+        }
+
+        .directory-header p {
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .directory-section {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--bg-lightest);
+            background: var(--bg-medium);
+        }
+
+        .directory-section h2 {
+            margin: 0 0 1rem 0;
+            font-size: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .folder-picker {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .folder-path {
+            flex: 1;
+            padding: 0.75rem;
+            background: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .folder-path.empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .installations-list {
+            margin-top: 1.5rem;
+        }
+
+        .installation-item {
+            background: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .installation-item.valid {
+            border-color: #4ec9b0;
+        }
+
+        .installation-icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+
+        .installation-info {
+            flex: 1;
+        }
+
+        .installation-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0 0 0.25rem 0;
+            color: #4ec9b0;
+        }
+
+        .installation-path {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-family: 'Consolas', 'Courier New', monospace;
+            margin: 0;
+        }
+
+
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            margin: 0 0 0.5rem 0;
+            color: var(--text-primary);
+        }
+
+        .empty-state p {
+            margin: 0;
+        }
+
+        .info-box {
+            background: rgba(78, 201, 176, 0.1);
+            border-left: 3px solid #4ec9b0;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+        }
+
+        .info-box p {
+            margin: 0;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .back-button {
+            position: fixed;
+            top: 1rem;
+            left: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background: var(--bg-hover);
+            border-color: var(--primary-color);
+        }
+
+        .scanning-indicator {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .scanning-indicator.active {
+            display: flex;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .installation-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+
+        .save-binds-btn {
+            padding: 0.5rem 1rem;
+            background: #387734;
+            color: white;
+            border: 1px solid #7ccd77;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .save-binds-btn:hover {
+            color: #fff;
+            background: #649a60;
+            border: 1px solid #b3c8b2;
+        }
+
+        .save-binds-btn:disabled {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: not-allowed;
+        }
+
+        .save-all-container {
+            background: var(--bg-darkest);
+            border: 1px solid var(--bg-lightest);
+            display: flex;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .loaded-file-info {
+            background: rgba(78, 201, 176, 0.15);
+            border: 1px solid #4ec9b0;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            display: none;
+        }
+
+        .loaded-file-info.visible {
+            display: block;
+        }
+
+        .loaded-file-info h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+            color: #4ec9b0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .loaded-file-info p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <button class="back-button" id="back-button">
+        <span>←</span>
+        <span>Back to Main</span>
+    </button>
+
+    <div class="directory-container">
+        <div class="directory-header">
+            <h1>⚙️ Auto Save Settings</h1>
+            <p>If checked, keybindings will be automatically saved to all detected installations when clicking the Save
+                button.</p>
+            <p>- The file name will be the same as the currently loaded keybindings file.</p>
+            <div style="margin-top: 1rem;" class="checkbox-container">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="auto-save-all-checkbox" style="cursor: pointer;">
+                    <span>Automatically save to all detected installations when clicking the Save button</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="directory-section">
+            <h2>📁 Installation Directory</h2>
+            <p style="margin-bottom: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+                Select the base Star Citizen installation directory (the folder containing LIVE, PTU, etc.)
+            </p>
+
+            <div class="folder-picker">
+                <div class="folder-path empty" id="folder-path">No directory selected</div>
+                <button class="btn btn-primary" id="choose-folder-btn">Choose Folder</button>
+            </div>
+
+            <div class="scanning-indicator" id="scanning-indicator">
+                <div class="spinner"></div>
+                <span>Scanning for installations...</span>
+            </div>
+
+            <div class="info-box">
+                <p>
+                    <strong>💡 Tip:</strong> This is typically located at
+                    <code>C:\Program Files\Roberts Space Industries\StarCitizen</code>
+                    or similar. The app will automatically detect LIVE, PTU, and TECH-PREVIEW versions.
+                </p>
+            </div>
+        </div>
+
+        <div class="directory-section">
+            <h2>🎮 Detected Installations</h2>
+
+            <div class="loaded-file-info" id="loaded-file-info">
+                <h3>📄 Currently Loaded Keybindings</h3>
+                <p id="loaded-file-display">No keybindings loaded</p>
+            </div>
+
+            <div id="installations-container">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <h3>No installations detected yet</h3>
+                    <p>Select your Star Citizen directory above to scan for installations</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const { invoke } = window.__TAURI__.core;
+        const { open } = window.__TAURI__.dialog;
+
+        const folderPathEl = document.getElementById('folder-path');
+        const chooseFolderBtn = document.getElementById('choose-folder-btn');
+        const installationsContainer = document.getElementById('installations-container');
+        const scanningIndicator = document.getElementById('scanning-indicator');
+        const backButton = document.getElementById('back-button');
+        const autoSaveAllCheckbox = document.getElementById('auto-save-all-checkbox');
+
+        // Handle back button
+        backButton.addEventListener('click', () =>
+        {
+            window.location.href = 'index.html';
+        });
+
+        // Handle auto-save checkbox
+        autoSaveAllCheckbox.addEventListener('change', (e) =>
+        {
+            localStorage.setItem('autoSaveToAllInstallations', e.target.checked.toString());
+            console.log('Auto-save to all installations:', e.target.checked);
+        });
+
+        // Handle folder selection
+        chooseFolderBtn.addEventListener('click', async () =>
+        {
+            try
+            {
+                const selectedPath = await open({
+                    directory: true,
+                    multiple: false,
+                    title: 'Select Star Citizen Installation Directory'
+                });
+
+                if (selectedPath)
+                {
+                    folderPathEl.textContent = selectedPath;
+                    folderPathEl.classList.remove('empty');
+
+                    // Save to localStorage
+                    localStorage.setItem('scInstallDirectory', selectedPath);
+
+                    // Scan for installations
+                    await scanForInstallations(selectedPath);
+                }
+            } catch (error)
+            {
+                console.error('Error selecting folder:', error);
+                alert('Error selecting folder: ' + error);
+            }
+        });
+
+        async function scanForInstallations(basePath)
+        {
+            scanningIndicator.classList.add('active');
+            installationsContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div><h3>Scanning...</h3></div>';
+
+            try
+            {
+                const installations = await invoke('scan_sc_installations', { basePath });
+
+                scanningIndicator.classList.remove('active');
+
+                if (installations.length === 0)
+                {
+                    installationsContainer.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">❌</div>
+              <h3>No valid installations found</h3>
+              <p>Make sure the selected folder contains Star Citizen installations (LIVE, PTU, etc.) with data.p4k files</p>
+            </div>
+          `;
+                } else
+                {
+                    renderInstallations(installations);
+                }
+            } catch (error)
+            {
+                scanningIndicator.classList.remove('active');
+                console.error('Error scanning installations:', error);
+                installationsContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">⚠️</div>
+            <h3>Error scanning directory</h3>
+            <p>${error}</p>
+          </div>
+        `;
+            }
+        }
+
+        function renderInstallations(installations)
+        {
+            // Create Save All button at the top
+            const saveAllBtnHTML = `<div class="save-all-container">
+        <button class="save-binds-btn" id="save-all-btn">
+          💾 Save Binds to All Installations
+        </button>
+      </div>`;
+
+            const listHTML = installations.map(installation => `
+        <div class="installation-item">
+          <div class="installation-icon">🚀</div>
+          <div class="installation-info">
+            <h3 class="installation-name">${installation.name}</h3>
+            <p class="installation-path">${installation.path}</p>
+          </div>
+          <div class="installation-actions">
+            <button class="save-binds-btn" data-path="${installation.path}" id="save-btn-${installation.name}">
+              💾 Save
+            </button>
+          </div>
+        </div>
+      `).join('');
+
+            installationsContainer.innerHTML = `<div id="save-all-container">${listHTML}${saveAllBtnHTML}</div>`;
+
+            // Add event listener to save all button
+            const saveAllBtn = document.getElementById('save-all-btn');
+            if (saveAllBtn)
+            {
+                saveAllBtn.addEventListener('click', () => saveBindsToAllInstallations(installations));
+            }
+
+            // Add event listeners to individual save buttons
+            installations.forEach(installation =>
+            {
+                const btn = document.getElementById(`save-btn-${installation.name}`);
+                if (btn)
+                {
+                    btn.addEventListener('click', () => saveBindsToInstall(installation));
+                }
+            });
+
+            // Check if keybindings are loaded and update button states
+            updateSaveButtonStates();
+        }
+
+        async function saveBindsToAllInstallations(installations)
+        {
+            const saveAllBtn = document.getElementById('save-all-btn');
+            const originalText = saveAllBtn.textContent;
+            const individualBtns = installations.map(i => document.getElementById(`save-btn-${i.name}`));
+
+            try
+            {
+                saveAllBtn.disabled = true;
+                individualBtns.forEach(btn => btn.disabled = true);
+                saveAllBtn.textContent = '⏳ Saving to all...';
+
+                // Save to each installation sequentially
+                for (const installation of installations)
+                {
+                    await invoke('save_bindings_to_install', {
+                        installationPath: installation.path
+                    });
+                }
+
+                saveAllBtn.textContent = '✓ Saved to all!';
+                setTimeout(() =>
+                {
+                    saveAllBtn.textContent = originalText;
+                    saveAllBtn.disabled = false;
+                    individualBtns.forEach(btn => btn.disabled = false);
+                    updateSaveButtonStates();
+                }, 2000);
+
+                alert('Successfully saved keybindings to all installations!');
+            } catch (error)
+            {
+                console.error('Error saving bindings:', error);
+                saveAllBtn.textContent = '❌ Failed';
+                setTimeout(() =>
+                {
+                    saveAllBtn.textContent = originalText;
+                    saveAllBtn.disabled = false;
+                    individualBtns.forEach(btn => btn.disabled = false);
+                    updateSaveButtonStates();
+                }, 2000);
+                alert(`Error saving bindings: ${error}`);
+            }
+        }
+
+        async function saveBindsToInstall(installation)
+        {
+            const btn = document.getElementById(`save-btn-${installation.name}`);
+            const originalText = btn.textContent;
+
+            try
+            {
+                btn.disabled = true;
+                btn.textContent = '⏳ Saving...';
+
+                await invoke('save_bindings_to_install', {
+                    installationPath: installation.path
+                });
+
+                btn.textContent = '✓ Saved!';
+                setTimeout(() =>
+                {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 2000);
+
+                // Show success message
+                alert(`Successfully saved keybindings to ${installation.name}!`);
+            } catch (error)
+            {
+                console.error('Error saving bindings:', error);
+                btn.textContent = '❌ Failed';
+                setTimeout(() =>
+                {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 2000);
+                alert(`Error saving bindings: ${error}`);
+            }
+        }
+
+        async function updateSaveButtonStates()
+        {
+            try
+            {
+                const fileName = await invoke('get_current_file_name');
+                // If we have a filename, enable all save buttons
+                document.querySelectorAll('.save-binds-btn').forEach(btn =>
+                {
+                    btn.disabled = false;
+                });
+                // Show loaded file info
+                const loadedFileInfo = document.getElementById('loaded-file-info');
+                const loadedFileDisplay = document.getElementById('loaded-file-display');
+                loadedFileInfo.classList.add('visible');
+                loadedFileDisplay.textContent = fileName;
+            } catch (error)
+            {
+                // No file loaded, disable all save buttons
+                document.querySelectorAll('.save-binds-btn').forEach(btn =>
+                {
+                    btn.disabled = true;
+                });
+                // Hide loaded file info
+                const loadedFileInfo = document.getElementById('loaded-file-info');
+                loadedFileInfo.classList.remove('visible');
+            }
+        }
+
+        // Load saved directory on startup
+        window.addEventListener('DOMContentLoaded', async () =>
+        {
+            const savedPath = localStorage.getItem('scInstallDirectory');
+            if (savedPath)
+            {
+                folderPathEl.textContent = savedPath;
+                folderPathEl.classList.remove('empty');
+                await scanForInstallations(savedPath);
+            }
+
+            // Load auto-save preference
+            const autoSaveEnabled = localStorage.getItem('autoSaveToAllInstallations') === 'true';
+            autoSaveAllCheckbox.checked = autoSaveEnabled;
+
+            // Check if keybindings are loaded
+            updateSaveButtonStates();
+        });
+    </script>
+</body>
+
+</html>

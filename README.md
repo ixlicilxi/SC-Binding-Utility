@@ -1,0 +1,84 @@
+# Star Citizen Binding Utility
+
+A desktop application for managing joystick, keyboard, and mouse key bindings for Star Citizen outside of the game. Built with Tauri 2.0 and Rust, this tool provides a powerful interface to organize, customize, and debug your control scheme.
+
+## Overview
+
+Star Citizen Joystick Mapper simplifies the complex task of configuring control inputs. Whether you're mapping a single joystick or dual-stick setup, this application provides visual feedback, comprehensive organization, and direct integration with your Star Citizen installation.
+
+## Core Features
+
+### Binding Management
+- **Keyboard/Mouse/Joystick Binding Page**: Comprehensive UI for viewing and modifying all key bindings
+- **Sorted Categories**: Automatically organized by major action categories (spaceships, fps, vehicles, etc.) for easy navigation
+- **Advanced Filtering**: Quickly find specific actions or bindings
+- **Multi-Joystick Support**: Configure up to two joysticks per profile with dedicated left and right view modes
+
+### Visual Joystick Viewer
+- **Interactive Visualization**: See your joystick layout and all assigned actions at a glance
+- **Left/Right View**: Toggle between individual stick views or compare configurations side-by-side
+- **Visual Indicators**: Identify customized bindings and default overrides
+- **Customizable Display**: Hide default keys and focus only on personalized bindings
+
+### Template Editor
+- **Custom Template Builder**: Create your own joystick input templates without leaving the app
+- **Button Management**: Add, remove, and reposition buttons on your template
+- **Image Upload**: Add custom images and button graphics to your templates
+- **Mirror Support**: Easily mirror button layouts for dual-stick configurations
+- **Template Persistence**: Save and manage multiple template profiles
+
+### Input Debugging
+- **Button ID Detector**: Automatically identify button IDs from joystick input
+- **Real-time Input Monitoring**: Watch button presses register in real-time
+- **Troubleshooting Helper**: Quickly determine unknown button identifiers from your hardware
+
+### Auto-Save & Integration
+- **Automatic Binding Updates**: Select your Star Citizen installation directory and the app automatically updates your actionmaps
+- **Direct File Integration**: Seamlessly sync with Star Citizen keybinding files
+- **Profile Management**: Support for multiple joystick profiles (VKB, Thrustmaster, etc.)
+- **Change Detection**: Auto-save captures and applies configuration changes
+
+## Advanced Features
+
+- **Modifier Key Support**: Bind actions with Ctrl, Alt, and Shift modifiers
+- **Binding Conflict Detection**: Visual alerts when multiple actions share the same binding
+- **Visual Export**: Export your joystick layout to an image
+- **Cleared Binding Display**: Visual distinction between cleared overrides and default bindings
+- **State Persistence**: Application remembers your visual view settings (pan, zoom, active view) between sessions
+
+## Technical Stack
+
+- **Frontend**: HTML, CSS, JavaScript with Vite
+- **Backend**: Rust with Tauri 2.0
+- **Platform**: Windows Desktop
+- **Input Handling**: DirectInput integration for joystick hardware detection
+
+## Getting Started
+
+## Usage
+
+1. **Launch the Application**: Start the Joystick Mapper
+2. **Load or Create a Profile**: Select an existing profile or create a new one
+3. **Customize Bindings**: 
+   - Use the Binding Page to set up keyboard, mouse, and joystick inputs
+   - Use the Visual View to see your joystick layout
+4. **Apply Changes**: Auto-save will update your Star Citizen installation automatically when you save your bindings
+
+## Tips & Tricks
+
+- **Profile Management**: Store multiple joystick profiles and switch between them easily
+- **Visual Debugging**: Use the Visual View to spot binding gaps or conflicts
+- **Template Sharing**: Export and share custom templates with other players
+- **Batch Updates**: The auto-save system means changes sync instantly to your game, including multiple installs
+
+## Known Limitations
+
+- DirectInput-based joystick detection (Windows only)
+
+## License
+
+This project is designed for personal use with Star Citizen by Cloud Imperium Games.
+
+---
+
+Made with Rust and web technologies for the Star Citizen community.

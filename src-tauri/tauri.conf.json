@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SC Binding Utility",
+  "version": "0.1.0",
+  "identifier": "com.boxxy.sc-joy-mapper",
+  "build": {
+    "frontendDist": "../src",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "SC Binding Utility",
+        "width": 1500,
+        "height": 1000
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../AllBinds.xml"
+    ]
+  }
+}

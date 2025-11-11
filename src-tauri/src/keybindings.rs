@@ -1,0 +1,1263 @@
+use serde::Serialize;
+use std::collections::HashMap;
+
+/// Represents the entire Star Citizen keybinding file
+#[derive(Debug, Serialize, Clone)]
+pub struct ActionMaps {
+    pub profile_name: String,
+    pub action_maps: Vec<ActionMap>,
+    pub categories: Vec<Category>,
+    pub devices: DeviceInfo,
+}
+
+/// Represents the AllBinds.xml master file with all available actions
+#[derive(Debug, Serialize, Clone)]
+pub struct AllBinds {
+    pub action_maps: Vec<AllBindsActionMap>,
+}
+
+/// Action map from AllBinds.xml with UI metadata
+#[derive(Debug, Serialize, Clone)]
+pub struct AllBindsActionMap {
+    pub name: String,
+    pub version: String,
+    pub ui_label: String,
+    pub ui_category: String,
+    pub actions: Vec<AllBindsAction>,
+}
+
+/// Action from AllBinds.xml with default bindings and UI metadata
+#[derive(Debug, Serialize, Clone)]
+pub struct AllBindsAction {
+    pub name: String,
+    pub ui_label: String,
+    pub ui_description: String,
+    pub category: String,
+    pub activation_mode: String,
+    pub on_hold: bool,
+    pub default_keyboard: String,
+    pub default_mouse: String,
+    pub default_gamepad: String,
+    pub default_joystick: String,
+}
+
+/// UI header containing metadata about devices and categories
+#[derive(Debug, Serialize, Clone)]
+pub struct DeviceInfo {
+    pub keyboards: Vec<String>,
+    pub mice: Vec<String>,
+    pub joysticks: Vec<String>,
+}
+
+/// A single category
+#[derive(Debug, Serialize, Clone)]
+pub struct Category {
+    pub label: String,
+}
+
+/// A group of actions (e.g., "seat_general", "spaceship_general")
+#[derive(Debug, Serialize, Clone)]
+pub struct ActionMap {
+    pub name: String,
+    pub actions: Vec<Action>,
+}
+
+/// A single action that can be bound to inputs
+#[derive(Debug, Serialize, Clone)]
+pub struct Action {
+    pub name: String,
+    pub rebinds: Vec<Rebind>,
+}
+
+/// A keybinding for an action
+#[derive(Debug, Serialize, Clone)]
+pub struct Rebind {
+    pub input: String,
+}
+
+/// Parsed input type for easier filtering
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub enum InputType {
+    Keyboard,
+    Mouse,
+    Joystick,
+    Gamepad,
+    Unknown,
+}
+
+impl Rebind {
+    /// Parse the input type from the rebind string
+    /// Examples: "kb1_space", "js1_button3", "js2_button15", "mouse1_left", "LALT+js1_button3", "kb1_u+lshift"
+    pub fn get_input_type(&self) -> InputType {
+        let input = self.input.trim();
+        
+        // Check all parts for device prefixes (handles modifiers in any position)
+        if input.contains('+') {
+            // Split and check each part for device prefix
+            for part in input.split('+') {
+                let part = part.trim();
+                if part.starts_with("kb") {
+                    return InputType::Keyboard;
+                } else if part.starts_with("mouse") {
+                    return InputType::Mouse;
+                } else if part.starts_with("js") {
+                    return InputType::Joystick;
+                } else if part.starts_with("gp") {
+                    return InputType::Gamepad;
+                }
+            }
+        } else {
+            // No modifiers, check the whole string
+            if input.starts_with("kb") {
+                return InputType::Keyboard;
+            } else if input.starts_with("mouse") {
+                return InputType::Mouse;
+            } else if input.starts_with("js") {
+                return InputType::Joystick;
+            } else if input.starts_with("gp") {
+                return InputType::Gamepad;
+            }
+        }
+        
+        InputType::Unknown
+    }
+    
+    /// Get a human-readable description of the binding
+    pub fn get_display_name(&self) -> String {
+        let input = self.input.trim();
+        
+        // Check if unbound - empty or ends with underscore and space(s)
+        if input.is_empty() || input.ends_with("_ ") || input.ends_with("_  ") || input.ends_with("_") {
+            return "Unbound".to_string();
+        }
+        
+        // Check for modifier prefixes (e.g., "lalt+rctrl+js1_button3" or "LALT+RCTRL+js1_button3")
+        let mut modifiers = Vec::new();
+        let mut remaining_input = input;
+        
+        // Extract all modifiers from the beginning (case-insensitive)
+        loop {
+            if let Some((prefix, rest)) = remaining_input.split_once('+') {
+                let prefix_upper = prefix.trim().to_uppercase();
+                if matches!(prefix_upper.as_str(), "LALT" | "RALT" | "LCTRL" | "RCTRL" | "LSHIFT" | "RSHIFT") {
+                    modifiers.push(prefix_upper);
+                    remaining_input = rest;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        // Parse the remaining input string (the actual binding)
+        let base_display = if let Some((device, binding)) = remaining_input.split_once('_') {
+            let binding = binding.trim();
+            if binding.is_empty() {
+                "Unbound".to_string()
+            } else {
+                match &device[..2.min(device.len())] {
+                    "kb" => format!("Keyboard - {}", Self::format_binding(binding)),
+                    "js" => {
+                        let instance = device.get(2..3).unwrap_or("1");
+                        format!("Joystick {} - {}", instance, Self::format_binding(binding))
+                    },
+                    "mo" => format!("Mouse - {}", Self::format_binding(binding)),
+                    "gp" => format!("Gamepad - {}", Self::format_binding(binding)),
+                    _ => format!("{} - {}", device, Self::format_binding(binding)),
+                }
+            }
+        } else {
+            remaining_input.to_string()
+        };
+        
+        // Format modifiers for display
+        if !modifiers.is_empty() {
+            let modifier_display: Vec<String> = modifiers.iter().map(|m| {
+                match m.as_str() {
+                    "LALT" => "Left Alt".to_string(),
+                    "RALT" => "Right Alt".to_string(),
+                    "LCTRL" => "Left Ctrl".to_string(),
+                    "RCTRL" => "Right Ctrl".to_string(),
+                    "LSHIFT" => "Left Shift".to_string(),
+                    "RSHIFT" => "Right Shift".to_string(),
+                    _ => m.clone(),
+                }
+            }).collect();
+            
+            format!("{} + {}", modifier_display.join(" + "), base_display)
+        } else {
+            base_display
+        }
+    }
+    
+    /// Format binding name to be more readable
+    fn format_binding(binding: &str) -> String {
+        let clean = binding.trim();
+        if clean.starts_with("button") {
+            if let Some(num) = clean.strip_prefix("button") {
+                return format!("Button {}", num.trim());
+            }
+        }
+        clean.replace('_', " ").to_uppercase()
+    }
+}
+
+/// Helper struct for organizing keybindings by category for the UI
+#[derive(Debug, Serialize, Clone)]
+pub struct OrganizedKeybindings {
+    pub profile_name: String,
+    pub categories: Vec<String>,
+    pub devices: DeviceInfo,
+    pub action_maps: Vec<OrganizedActionMap>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct OrganizedActionMap {
+    pub name: String,
+    pub display_name: String,
+    pub actions: Vec<OrganizedAction>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct OrganizedAction {
+    pub name: String,
+    pub display_name: String,
+    pub bindings: Vec<BindingInfo>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct BindingInfo {
+    pub input: String,
+    pub input_type: String,
+    pub display_name: String,
+}
+
+impl ActionMaps {
+    /// Check if there are any customized keyboard bindings
+    pub fn has_keyboard_bindings(&self) -> bool {
+        self.action_maps.iter().any(|action_map| {
+            action_map.actions.iter().any(|action| {
+                action.rebinds.iter().any(|rebind| {
+                    rebind.get_input_type() == InputType::Keyboard
+                })
+            })
+        })
+    }
+    
+    /// Check if there are any customized mouse bindings
+    pub fn has_mouse_bindings(&self) -> bool {
+        self.action_maps.iter().any(|action_map| {
+            action_map.actions.iter().any(|action| {
+                action.rebinds.iter().any(|rebind| {
+                    rebind.get_input_type() == InputType::Mouse
+                })
+            })
+        })
+    }
+    
+    /// Parse XML file into ActionMaps structure using event-based parser
+    pub fn from_xml(xml: &str) -> Result<Self, String> {
+        let mut profile_name = String::new();
+        let mut action_maps = Vec::new();
+        let mut categories = Vec::new();
+        let mut devices = DeviceInfo {
+            keyboards: Vec::new(),
+            mice: Vec::new(),
+            joysticks: Vec::new(),
+        };
+        
+        // Use quick-xml's Reader
+        let mut reader = quick_xml::Reader::from_str(xml);
+        let mut buf = vec![];
+        let mut current_action_map: Option<ActionMap> = None;
+        let mut current_action: Option<Action> = None;
+        
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(quick_xml::events::Event::Start(ref e)) | Ok(quick_xml::events::Event::Empty(ref e)) => {
+                    match e.name().as_ref() {
+                        b"ActionMaps" => {
+                            // Get profile name
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"profileName" {
+                                    profile_name = String::from_utf8(attr.value.to_vec())
+                                        .unwrap_or_default();
+                                }
+                            }
+                        },
+                        b"category" => {
+                            // Get category label
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"label" {
+                                    let label = String::from_utf8(attr.value.to_vec())
+                                        .unwrap_or_default();
+                                    if !label.is_empty() {
+                                        categories.push(Category { label });
+                                    }
+                                }
+                            }
+                        },
+                        b"options" => {
+                            let mut device_type = String::new();
+                            let mut product = String::new();
+                            
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"type" => device_type = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    b"Product" => product = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    _ => {}
+                                }
+                            }
+                            
+                            if !product.is_empty() {
+                                match device_type.as_str() {
+                                    "keyboard" => devices.keyboards.push(product),
+                                    "mouse" => devices.mice.push(product),
+                                    "joystick" => devices.joysticks.push(product),
+                                    _ => {}
+                                }
+                            }
+                        },
+                        b"actionmap" => {
+                            let mut name = String::new();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"name" {
+                                    name = String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                }
+                            }
+                            current_action_map = Some(ActionMap {
+                                name,
+                                actions: Vec::new(),
+                            });
+                        },
+                        b"action" => {
+                            let mut name = String::new();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"name" {
+                                    name = String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                }
+                            }
+                            current_action = Some(Action {
+                                name,
+                                rebinds: Vec::new(),
+                            });
+                        },
+                        b"rebind" => {
+                            let mut input = String::new();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"input" {
+                                    input = String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                }
+                            }
+                            if let Some(ref mut action) = current_action {
+                                action.rebinds.push(Rebind { input });
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                Ok(quick_xml::events::Event::End(ref e)) => {
+                    match e.name().as_ref() {
+                        b"action" => {
+                            if let (Some(action), Some(ref mut action_map)) = (current_action.take(), &mut current_action_map) {
+                                action_map.actions.push(action);
+                            }
+                        },
+                        b"actionmap" => {
+                            if let Some(action_map) = current_action_map.take() {
+                                action_maps.push(action_map);
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(e) => {
+                    return Err(format!("XML parsing error: {}", e));
+                },
+                _ => {}
+            }
+            buf.clear();
+        }
+        
+        Ok(ActionMaps {
+            profile_name,
+            action_maps,
+            categories,
+            devices,
+        })
+    }
+    
+    /// Serialize ActionMaps to XML format matching Star Citizen's keybinding format
+    /// Only exports actions that have actual rebinds (customizations)
+    pub fn to_xml(&self) -> String {
+        let mut xml = String::new();
+        
+        // XML declaration (no BOM, UTF-8)
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        
+        // Root ActionMaps element
+        xml.push_str(&format!(
+            "<ActionMaps version=\"1\" optionsVersion=\"2\" rebindVersion=\"2\" profileName=\"{}\">\n",
+            self.profile_name
+        ));
+        
+        // Write CustomisationUIHeader
+        xml.push_str(" <CustomisationUIHeader label=\"");
+        xml.push_str(&self.profile_name);
+        xml.push_str("\" description=\"\" image=\"\">\n");
+        
+        // Check if we have keyboard or mouse customizations
+        let has_keyboard = self.has_keyboard_bindings();
+        let has_mouse = self.has_mouse_bindings();
+        
+        // Write devices section - order matters!
+        xml.push_str("  <devices>\n");
+        if has_keyboard {
+            xml.push_str("   <keyboard instance=\"1\"/>\n");
+        }
+        if has_mouse {
+            xml.push_str("   <mouse instance=\"1\"/>\n");
+        }
+        // Write joystick instances
+        for i in 1..=self.devices.joysticks.len().max(2) {
+            xml.push_str(&format!("   <joystick instance=\"{}\"/>\n", i));
+        }
+        xml.push_str("  </devices>\n");
+        
+        // Write categories section if we have any
+        if !self.categories.is_empty() {
+            xml.push_str("  <categories>\n");
+            for category in &self.categories {
+                xml.push_str("   <category label=\"");
+                xml.push_str(&category.label);
+                xml.push_str("\"/>\n");
+            }
+            xml.push_str("  </categories>\n");
+        }
+        
+        xml.push_str(" </CustomisationUIHeader>\n");
+        
+        // Write options for each device type - order matters!
+        // Keyboard options first (if we have keyboard bindings)
+        if has_keyboard {
+            if !self.devices.keyboards.is_empty() {
+                for keyboard in &self.devices.keyboards {
+                    xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"");
+                    xml.push_str(keyboard);
+                    xml.push_str("\"/>\n");
+                }
+            } else {
+                // Add default keyboard product ID
+                xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
+            }
+        }
+        
+        // Mouse options second (if we have mouse bindings)
+        if has_mouse {
+            if !self.devices.mice.is_empty() {
+                for mouse in &self.devices.mice {
+                    xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"");
+                    xml.push_str(mouse);
+                    xml.push_str("\"/>\n");
+                }
+            } else {
+                // Add default mouse product ID
+                xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
+            }
+        }
+        
+        // Joystick options last
+        if !self.devices.joysticks.is_empty() {
+            for (idx, joystick) in self.devices.joysticks.iter().enumerate() {
+                let instance = idx + 1;
+                xml.push_str(&format!(" <options type=\"joystick\" instance=\"{}\" Product=\"", instance));
+                xml.push_str(joystick);
+                xml.push_str("\"/>\n");
+            }
+        }
+        
+        // Write modifiers section (empty but required)
+        xml.push_str(" <modifiers />\n");
+        
+        // Filter and write only action maps that have rebinds
+        for action_map in &self.action_maps {
+            // Filter actions to only those with non-empty rebinds
+            let actions_with_rebinds: Vec<&Action> = action_map.actions.iter()
+                .filter(|action| {
+                    !action.rebinds.is_empty() && 
+                    action.rebinds.iter().any(|r| {
+                        let trimmed = r.input.trim();
+                        // Skip if empty, just underscore+space, or ends with underscore
+                        !trimmed.is_empty() && 
+                        trimmed != " " &&
+                        !trimmed.ends_with("_ ") && 
+                        !trimmed.ends_with("_")
+                    })
+                })
+                .collect();
+            
+            // Only write action map if it has actions with rebinds
+            if !actions_with_rebinds.is_empty() {
+                xml.push_str(" <actionmap name=\"");
+                xml.push_str(&action_map.name);
+                xml.push_str("\">\n");
+                
+                // Write actions
+                for action in actions_with_rebinds {
+                    xml.push_str("  <action name=\"");
+                    xml.push_str(&action.name);
+                    xml.push_str("\">\n");
+                    
+                    // Write rebinds
+                    for rebind in &action.rebinds {
+                        xml.push_str("   <rebind input=\"");
+                        xml.push_str(&rebind.input);
+                        xml.push_str("\"/>\n");
+                    }
+                    
+                    xml.push_str("  </action>\n");
+                }
+                
+                xml.push_str(" </actionmap>\n");
+            }
+        }
+        
+        // Close root element
+        xml.push_str("</ActionMaps>\n");
+        
+        xml
+    }
+    
+    /// Enhanced export that determines categories from actionmaps with custom bindings
+    /// and preserves the order from AllBinds.xml
+    pub fn to_xml_with_categories(&self, all_binds: Option<&AllBinds>) -> String {
+        use std::collections::{HashSet, HashMap};
+        
+        let mut xml = String::new();
+        
+        // XML declaration
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        
+        // Root ActionMaps element
+        xml.push_str(&format!(
+            "<ActionMaps version=\"1\" optionsVersion=\"2\" rebindVersion=\"2\" profileName=\"{}\">\n",
+            self.profile_name
+        ));
+        
+        // Build a map of actionmap names to their categories and order
+        let mut actionmap_to_category: HashMap<String, (String, usize)> = HashMap::new();
+        if let Some(all_binds) = all_binds {
+            for (idx, all_binds_map) in all_binds.action_maps.iter().enumerate() {
+                actionmap_to_category.insert(
+                    all_binds_map.name.clone(),
+                    (all_binds_map.ui_category.clone(), idx)
+                );
+            }
+        }
+        
+        // Determine which actionmaps have custom bindings
+        // NOTE: We include actionmaps with cleared bindings (ending with "_ ") 
+        // because these are used to override defaults in Star Citizen
+        let mut actionmaps_with_bindings = Vec::new();
+        for action_map in &self.action_maps {
+            let has_custom_bindings = action_map.actions.iter().any(|action| {
+                !action.rebinds.is_empty()
+            });
+            
+            if has_custom_bindings {
+                actionmaps_with_bindings.push(action_map.name.clone());
+            }
+        }
+        
+        // Collect unique categories from actionmaps with bindings, preserving order
+        let mut categories_ordered = Vec::new();
+        let mut seen_categories = HashSet::new();
+        
+        // First pass: collect categories in the order they appear in AllBinds
+        if let Some(all_binds) = all_binds {
+            for all_binds_map in &all_binds.action_maps {
+                if actionmaps_with_bindings.contains(&all_binds_map.name) {
+                    if !all_binds_map.ui_category.is_empty() && 
+                       !seen_categories.contains(&all_binds_map.ui_category) {
+                        categories_ordered.push(all_binds_map.ui_category.clone());
+                        seen_categories.insert(all_binds_map.ui_category.clone());
+                    }
+                }
+            }
+        }
+        
+        // Write CustomisationUIHeader
+        xml.push_str(" <CustomisationUIHeader label=\"");
+        xml.push_str(&self.profile_name);
+        xml.push_str("\" description=\"\" image=\"\">\n");
+        
+        // Check if we have keyboard or mouse customizations
+        let has_keyboard = self.has_keyboard_bindings();
+        let has_mouse = self.has_mouse_bindings();
+        
+        // Write devices section - order matters!
+        xml.push_str("  <devices>\n");
+        if has_keyboard {
+            xml.push_str("   <keyboard instance=\"1\"/>\n");
+        }
+        if has_mouse {
+            xml.push_str("   <mouse instance=\"1\"/>\n");
+        }
+        // Write joystick instances
+        for i in 1..=self.devices.joysticks.len().max(2) {
+            xml.push_str(&format!("   <joystick instance=\"{}\"/>\n", i));
+        }
+        xml.push_str("  </devices>\n");
+        
+        // Write categories section with proper ordering
+        if !categories_ordered.is_empty() {
+            xml.push_str("  <categories>\n");
+            for category in &categories_ordered {
+                xml.push_str("   <category label=\"");
+                xml.push_str(category);
+                xml.push_str("\"/>\n");
+            }
+            xml.push_str("  </categories>\n");
+        }
+        
+        xml.push_str(" </CustomisationUIHeader>\n");
+        
+        // Write options for each device type - order matters!
+        // Keyboard options first (if we have keyboard bindings)
+        if has_keyboard {
+            // Use a default keyboard product ID if the devices list is empty
+            if !self.devices.keyboards.is_empty() {
+                for keyboard in &self.devices.keyboards {
+                    xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"");
+                    xml.push_str(keyboard);
+                    xml.push_str("\"/>\n");
+                }
+            } else {
+                // Add default keyboard product ID
+                xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
+            }
+        }
+        
+        // Mouse options second (if we have mouse bindings)
+        if has_mouse {
+            // Use a default mouse product ID if the devices list is empty
+            if !self.devices.mice.is_empty() {
+                for mouse in &self.devices.mice {
+                    xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"");
+                    xml.push_str(mouse);
+                    xml.push_str("\"/>\n");
+                }
+            } else {
+                // Add default mouse product ID
+                xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
+            }
+        }
+        
+        // Joystick options last
+        if !self.devices.joysticks.is_empty() {
+            for (idx, joystick) in self.devices.joysticks.iter().enumerate() {
+                let instance = idx + 1;
+                xml.push_str(&format!(" <options type=\"joystick\" instance=\"{}\" Product=\"", instance));
+                xml.push_str(joystick);
+                xml.push_str("\"/>\n");
+            }
+        }
+        
+        xml.push_str(" <modifiers />\n");
+        
+        // Sort actionmaps according to AllBinds.xml order
+        let mut sorted_actionmaps_with_bindings: Vec<_> = actionmaps_with_bindings.iter()
+            .map(|name| {
+                let order = actionmap_to_category.get(name)
+                    .map(|(_, idx)| *idx)
+                    .unwrap_or(usize::MAX);
+                (name, order)
+            })
+            .collect();
+        sorted_actionmaps_with_bindings.sort_by_key(|(_, order)| *order);
+        
+        // Write actionmaps in the proper order
+        for (actionmap_name, _) in sorted_actionmaps_with_bindings {
+            if let Some(action_map) = self.action_maps.iter().find(|am| &am.name == actionmap_name) {
+                // Include ALL actions with rebinds, even cleared ones (ending with "_ ")
+                // Cleared bindings need to be written to override Star Citizen defaults
+                let actions_with_rebinds: Vec<&Action> = action_map.actions.iter()
+                    .filter(|action| !action.rebinds.is_empty())
+                    .collect();
+                
+                if !actions_with_rebinds.is_empty() {
+                    xml.push_str(" <actionmap name=\"");
+                    xml.push_str(&action_map.name);
+                    xml.push_str("\">\n");
+                    
+                    for action in actions_with_rebinds {
+                        xml.push_str("  <action name=\"");
+                        xml.push_str(&action.name);
+                        xml.push_str("\">\n");
+                        
+                        for rebind in &action.rebinds {
+                            xml.push_str("   <rebind input=\"");
+                            xml.push_str(&rebind.input);
+                            xml.push_str("\"/>\n");
+                        }
+                        
+                        xml.push_str("  </action>\n");
+                    }
+                    
+                    xml.push_str(" </actionmap>\n");
+                }
+            }
+        }
+        
+        xml.push_str("</ActionMaps>\n");
+        
+        xml
+    }
+    
+    /// Organize keybindings for easier UI display
+    pub fn organize(&self) -> OrganizedKeybindings {
+        // Get categories
+        let categories: Vec<String> = self.categories
+            .iter()
+            .map(|c| c.label.clone())
+            .filter(|label| !label.is_empty())
+            .collect();
+        
+        // Organize action maps
+        let organized_maps: Vec<OrganizedActionMap> = self.action_maps.iter()
+            .map(|action_map| {
+                let organized_actions: Vec<OrganizedAction> = action_map.actions.iter()
+                    .map(|action| {
+                        let bindings: Vec<BindingInfo> = action.rebinds.iter()
+                            .map(|rebind| {
+                                let input_type = rebind.get_input_type();
+                                BindingInfo {
+                                    input: rebind.input.clone(),
+                                    input_type: format!("{:?}", input_type),
+                                    display_name: rebind.get_display_name(),
+                                }
+                            })
+                            .collect();
+                        
+                        OrganizedAction {
+                            name: action.name.clone(),
+                            display_name: Self::format_action_name(&action.name),
+                            bindings,
+                        }
+                    })
+                    .collect();
+                
+                OrganizedActionMap {
+                    name: action_map.name.clone(),
+                    display_name: Self::format_action_map_name(&action_map.name),
+                    actions: organized_actions,
+                }
+            })
+            .collect();
+        
+        OrganizedKeybindings {
+            profile_name: self.profile_name.clone(),
+            categories,
+            devices: self.devices.clone(),
+            action_maps: organized_maps,
+        }
+    }
+    
+    /// Create a new empty action map with the given name and actions
+    pub fn new_empty_action_map(name: String, actions: Vec<Action>) -> ActionMap {
+        ActionMap {
+            name,
+            actions,
+        }
+    }
+    
+    /// Convert action_map name to display name
+    fn format_action_map_name(name: &str) -> String {
+        format_display_name(name)
+    }
+    
+    /// Convert action name to display name
+    fn format_action_name(name: &str) -> String {
+        format_display_name(name)
+    }
+}
+
+/// Comprehensive display name formatter for action names
+/// Handles various naming patterns:
+/// - v_action_name -> Action Name
+/// - pc_action_name -> Action Name  
+/// - PascalCase -> Pascal Case
+/// - camelCase -> Camel Case
+/// - snake_case -> Snake Case
+/// - turret_gyromode -> Turret Gyro Mode (splits compounds)
+pub fn format_display_name(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+    
+    // Remove common prefixes
+    let cleaned = name
+        .trim_start_matches("v_")
+        .trim_start_matches("pc_")
+        .trim_start_matches("ui_")
+        .trim_start_matches("spectate_");
+    
+    // Handle special abbreviations and technical terms
+    let result = cleaned
+        .replace("mfd", "MFD")
+        .replace("fps", "FPS")
+        .replace("esp", "ESP")
+        .replace("vjoy", "VJoy")
+        .replace("mgv", "MGV")
+        .replace("hud", "HUD")
+        .replace("ifcs", "IFCS")
+        .replace("vtol", "VTOL")
+        .replace("ptu", "PTU")
+        .replace("atc", "ATC");
+    
+    // Split on underscores first
+    let parts: Vec<&str> = result.split('_').collect();
+    
+    let formatted_parts: Vec<String> = parts.iter()
+        .map(|part| {
+            if part.is_empty() {
+                return String::new();
+            }
+            
+            // Check if it's all caps (abbreviation) - preserve it
+            if part.chars().all(|c| c.is_uppercase() || c.is_numeric()) {
+                return part.to_string();
+            }
+            
+            // Check if it's a mix of uppercase and lowercase (PascalCase or camelCase)
+            if part.chars().any(|c| c.is_uppercase()) && part.chars().any(|c| c.is_lowercase()) {
+                split_camel_case(part)
+            } else {
+                // Regular word - capitalize first letter
+                capitalize_word(part)
+            }
+        })
+        .collect();
+    
+    formatted_parts.join(" ").trim().to_string()
+}
+
+/// Split PascalCase or camelCase into separate words
+fn split_camel_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_was_lower = false;
+    let mut prev_was_upper = false;
+    
+    for (i, c) in s.chars().enumerate() {
+        if i == 0 {
+            result.push(c.to_ascii_uppercase());
+            prev_was_upper = c.is_uppercase();
+            prev_was_lower = c.is_lowercase();
+        } else if c.is_uppercase() {
+            // Add space before uppercase if previous was lowercase
+            // or if this is start of a new word (e.g., "HTMLParser" -> "HTML Parser")
+            if prev_was_lower {
+                result.push(' ');
+            } else if prev_was_upper && i + 1 < s.len() {
+                // Check if next char is lowercase (indicates start of new word)
+                if let Some(next_c) = s.chars().nth(i + 1) {
+                    if next_c.is_lowercase() {
+                        result.push(' ');
+                    }
+                }
+            }
+            result.push(c);
+            prev_was_upper = true;
+            prev_was_lower = false;
+        } else {
+            result.push(c);
+            prev_was_upper = false;
+            prev_was_lower = true;
+        }
+    }
+    
+    result
+}
+
+/// Capitalize the first letter of a word
+fn capitalize_word(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => {
+            let rest: String = chars.collect();
+            // Handle special cases
+            match word.to_lowercase().as_str() {
+                "up" | "down" | "left" | "right" => word.to_uppercase(),
+                "x" | "y" | "z" => word.to_uppercase(),
+                "1to1" => "1:1".to_string(),
+                _ => first.to_uppercase().collect::<String>() + &rest.to_lowercase(),
+            }
+        }
+    }
+}
+
+impl AllBinds {
+    /// Parse AllBinds.xml file into AllBinds structure
+    pub fn from_xml(xml: &str) -> Result<Self, String> {
+        let mut action_maps = Vec::new();
+        let mut reader = quick_xml::Reader::from_str(xml);
+        let mut buf = vec![];
+        
+        let mut current_action_map: Option<AllBindsActionMap> = None;
+        
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(quick_xml::events::Event::Start(ref e)) | Ok(quick_xml::events::Event::Empty(ref e)) => {
+                    match e.name().as_ref() {
+                        b"actionmap" => {
+                            let mut name = String::new();
+                            let mut version = String::new();
+                            let mut ui_label = String::new();
+                            let mut ui_category = String::new();
+                            
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"name" => name = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    b"version" => version = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    b"UILabel" => ui_label = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    b"UICategory" => ui_category = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    _ => {}
+                                }
+                            }
+                            
+                            current_action_map = Some(AllBindsActionMap {
+                                name,
+                                version,
+                                ui_label,
+                                ui_category,
+                                actions: Vec::new(),
+                            });
+                        },
+                        b"action" => {
+                            if let Some(ref mut action_map) = current_action_map {
+                                let mut name = String::new();
+                                let mut ui_label = String::new();
+                                let mut ui_description = String::new();
+                                let mut category = String::new();
+                                let mut activation_mode = String::new();
+                                let mut on_hold = false;
+                                let mut keyboard = String::new();
+                                let mut mouse = String::new();
+                                let mut gamepad = String::new();
+                                let mut joystick = String::new();
+                                
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"name" => name = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"UILabel" => ui_label = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"UIDescription" => ui_description = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"Category" => category = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"activationMode" => activation_mode = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"onHold" => {
+                                            let val = String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                            on_hold = val == "1";
+                                        },
+                                        b"keyboard" => keyboard = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"mouse" => mouse = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"gamepad" => gamepad = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        b"joystick" => joystick = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                        _ => {}
+                                    }
+                                }
+                                
+                                action_map.actions.push(AllBindsAction {
+                                    name,
+                                    ui_label,
+                                    ui_description,
+                                    category,
+                                    activation_mode,
+                                    on_hold,
+                                    default_keyboard: keyboard,
+                                    default_mouse: mouse,
+                                    default_gamepad: gamepad,
+                                    default_joystick: joystick,
+                                });
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                Ok(quick_xml::events::Event::End(ref e)) => {
+                    if e.name().as_ref() == b"actionmap" {
+                        if let Some(action_map) = current_action_map.take() {
+                            action_maps.push(action_map);
+                        }
+                    }
+                },
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(e) => {
+                    return Err(format!("XML parsing error: {}", e));
+                },
+                _ => {}
+            }
+            buf.clear();
+        }
+        
+        Ok(AllBinds { action_maps })
+    }
+}
+
+/// Merged view of AllBinds with user customizations
+#[derive(Debug, Serialize, Clone)]
+pub struct MergedBindings {
+    pub action_maps: Vec<MergedActionMap>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MergedActionMap {
+    pub name: String,
+    pub ui_label: String,
+    pub ui_category: String,
+    pub actions: Vec<MergedAction>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MergedAction {
+    pub name: String,
+    pub ui_label: String,
+    pub ui_description: String,
+    pub category: String,
+    pub is_customized: bool,
+    pub on_hold: bool,
+    pub bindings: Vec<MergedBinding>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MergedBinding {
+    pub input: String,
+    pub display_name: String,
+    pub input_type: String,
+    pub is_default: bool,
+}
+
+impl AllBinds {
+    /// Merge AllBinds with user customizations from ActionMaps
+    pub fn merge_with_user_bindings(&self, user_bindings: Option<&ActionMaps>) -> MergedBindings {
+        // Build a lookup map for user bindings
+        let mut user_actions: HashMap<(String, String), Vec<Rebind>> = HashMap::new();
+        
+        if let Some(user_maps) = user_bindings {
+            for action_map in &user_maps.action_maps {
+                for action in &action_map.actions {
+                    user_actions.insert(
+                        (action_map.name.clone(), action.name.clone()),
+                        action.rebinds.clone()
+                    );
+                }
+            }
+        }
+        
+        let merged_maps: Vec<MergedActionMap> = self.action_maps.iter()
+            .map(|all_binds_map| {
+                let merged_actions: Vec<MergedAction> = all_binds_map.actions.iter()
+                    .map(|all_binds_action| {
+                        // Check if user has custom bindings for this action
+                        let user_rebinds = user_actions.get(&(
+                            all_binds_map.name.clone(),
+                            all_binds_action.name.clone()
+                        ));
+                        
+                        // Only consider it customized if there are actual non-empty rebinds
+                        let is_customized = if let Some(rebinds) = user_rebinds {
+                            // Action is customized if there are ANY rebinds from the user
+                            // This includes cleared bindings (e.g., "js1_ ") which represent explicit user action
+                            !rebinds.is_empty()
+                        } else {
+                            false
+                        };
+                        
+                        let bindings: Vec<MergedBinding> = if let Some(rebinds) = user_rebinds {
+                            // User has custom bindings - include them plus defaults for other input types
+                            let mut all_bindings: Vec<MergedBinding> = rebinds.iter()
+                                .filter(|rebind| {
+                                    // Filter out "cleared" bindings (e.g., "js1_ ", "kb1_ ", etc.)
+                                    // These are used to override defaults but shouldn't be displayed
+                                    let input = rebind.input.trim();
+                                    !input.ends_with("_ ")
+                                })
+                                .map(|rebind| {
+                                    let input_type = rebind.get_input_type();
+                                    MergedBinding {
+                                        input: rebind.input.clone(),
+                                        display_name: rebind.get_display_name(),
+                                        input_type: format!("{:?}", input_type),
+                                        is_default: false,
+                                    }
+                                }).collect();
+                            
+                            // Build a set of input types we already have from user bindings
+                            use std::collections::HashSet;
+                            let custom_input_types: HashSet<String> = all_bindings.iter()
+                                .map(|b| b.input_type.clone())
+                                .collect();
+                            
+                            // Add keyboard default if not customized
+                            if !custom_input_types.contains("Keyboard") {
+                                let kb_trimmed = all_binds_action.default_keyboard.trim();
+                                if !kb_trimmed.is_empty() && kb_trimmed != " " {
+                                    let rebind = Rebind { input: format!("kb1_{}", kb_trimmed) };
+                                    let input_type = rebind.get_input_type();
+                                    all_bindings.push(MergedBinding {
+                                        input: rebind.input.clone(),
+                                        display_name: rebind.get_display_name(),
+                                        input_type: format!("{:?}", input_type),
+                                        is_default: true,
+                                    });
+                                }
+                            }
+                            
+                            // Add gamepad default if not customized
+                            if !custom_input_types.contains("Gamepad") {
+                                let gp_trimmed = all_binds_action.default_gamepad.trim();
+                                if !gp_trimmed.is_empty() && gp_trimmed != " " {
+                                    let rebind = Rebind { input: format!("gp1_{}", gp_trimmed) };
+                                    let input_type = rebind.get_input_type();
+                                    all_bindings.push(MergedBinding {
+                                        input: rebind.input.clone(),
+                                        display_name: rebind.get_display_name(),
+                                        input_type: format!("{:?}", input_type),
+                                        is_default: true,
+                                    });
+                                }
+                            }
+                            
+                            // Add joystick default if not customized
+                            if !custom_input_types.contains("Joystick") {
+                                let js_trimmed = all_binds_action.default_joystick.trim();
+                                if !js_trimmed.is_empty() && js_trimmed != " " {
+                                    let rebind = Rebind { input: format!("js1_{}", js_trimmed) };
+                                    let input_type = rebind.get_input_type();
+                                    all_bindings.push(MergedBinding {
+                                        input: rebind.input.clone(),
+                                        display_name: rebind.get_display_name(),
+                                        input_type: format!("{:?}", input_type),
+                                        is_default: true,
+                                    });
+                                }
+                            }
+                            
+                            // Add mouse default if not customized
+                            if !custom_input_types.contains("Mouse") {
+                                let mouse_trimmed = all_binds_action.default_mouse.trim();
+                                if !mouse_trimmed.is_empty() && mouse_trimmed != " " {
+                                    let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed) };
+                                    let input_type = rebind.get_input_type();
+                                    all_bindings.push(MergedBinding {
+                                        input: rebind.input.clone(),
+                                        display_name: rebind.get_display_name(),
+                                        input_type: format!("{:?}", input_type),
+                                        is_default: true,
+                                    });
+                                }
+                            }
+                            
+                            all_bindings
+                        } else {
+                            // No custom bindings, use defaults from AllBinds
+                            let mut default_bindings = Vec::new();
+                            
+                            // Add keyboard default if exists
+                            let kb_trimmed = all_binds_action.default_keyboard.trim();
+                            if !kb_trimmed.is_empty() && kb_trimmed != " " {
+                                let rebind = Rebind { input: format!("kb1_{}", kb_trimmed) };
+                                let input_type = rebind.get_input_type();
+                                default_bindings.push(MergedBinding {
+                                    input: rebind.input.clone(),
+                                    display_name: rebind.get_display_name(),
+                                    input_type: format!("{:?}", input_type),
+                                    is_default: true,
+                                });
+                            }
+                            
+                            // Add gamepad default if exists
+                            let gp_trimmed = all_binds_action.default_gamepad.trim();
+                            if !gp_trimmed.is_empty() && gp_trimmed != " " {
+                                let rebind = Rebind { input: format!("gp1_{}", gp_trimmed) };
+                                let input_type = rebind.get_input_type();
+                                default_bindings.push(MergedBinding {
+                                    input: rebind.input.clone(),
+                                    display_name: rebind.get_display_name(),
+                                    input_type: format!("{:?}", input_type),
+                                    is_default: true,
+                                });
+                            }
+                            
+                            // Add joystick default if exists
+                            let js_trimmed = all_binds_action.default_joystick.trim();
+                            if !js_trimmed.is_empty() && js_trimmed != " " {
+                                let rebind = Rebind { input: format!("js1_{}", js_trimmed) };
+                                let input_type = rebind.get_input_type();
+                                default_bindings.push(MergedBinding {
+                                    input: rebind.input.clone(),
+                                    display_name: rebind.get_display_name(),
+                                    input_type: format!("{:?}", input_type),
+                                    is_default: true,
+                                });
+                            }
+                            
+                            // Add mouse default if exists
+                            let mouse_trimmed = all_binds_action.default_mouse.trim();
+                            if !mouse_trimmed.is_empty() && mouse_trimmed != " " {
+                                let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed) };
+                                let input_type = rebind.get_input_type();
+                                default_bindings.push(MergedBinding {
+                                    input: rebind.input.clone(),
+                                    display_name: rebind.get_display_name(),
+                                    input_type: format!("{:?}", input_type),
+                                    is_default: true,
+                                });
+                            }
+                            
+                            default_bindings
+                        };
+                        
+                        // Use UILabel if available and not a localization key, otherwise format the name
+                        let display_label = if !all_binds_action.ui_label.is_empty() 
+                            && !all_binds_action.ui_label.starts_with('@') {
+                            all_binds_action.ui_label.clone()
+                        } else {
+                            format_display_name(&all_binds_action.name)
+                        };
+                        
+                        MergedAction {
+                            name: all_binds_action.name.clone(),
+                            ui_label: display_label,
+                            ui_description: all_binds_action.ui_description.clone(),
+                            category: all_binds_action.category.clone(),
+                            is_customized,
+                            on_hold: all_binds_action.on_hold,
+                            bindings,
+                        }
+                    })
+                    .collect();
+                
+                // Use UILabel if available and not a localization key, otherwise format the name
+                let display_map_label = if !all_binds_map.ui_label.is_empty() 
+                    && !all_binds_map.ui_label.starts_with('@') {
+                    all_binds_map.ui_label.clone()
+                } else {
+                    format_display_name(&all_binds_map.name)
+                };
+                
+                MergedActionMap {
+                    name: all_binds_map.name.clone(),
+                    ui_label: display_map_label,
+                    ui_category: all_binds_map.ui_category.clone(),
+                    actions: merged_actions,
+                }
+            })
+            .collect();
+        
+        MergedBindings {
+            action_maps: merged_maps,
+        }
+    }
+}
