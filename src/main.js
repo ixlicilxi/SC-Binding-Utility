@@ -71,6 +71,7 @@ let customizedOnly = false;
 let showDefaultBindings = true;
 let currentTab = 'main';
 let categoryFriendlyNames = {};
+let currentFilename = null; // Track the current file name for the copy command
 const SECONDARY_WINDOW_MS = 1000; // One-second window for multi-input capture
 
 function setBindingSaveEnabled(enabled)
@@ -803,7 +804,40 @@ function initializeEventListeners()
     });
   }
 
-  // Customized only checkbox
+  // Copy command button
+  const copyCommandBtn = document.getElementById('copy-command-btn');
+  if (copyCommandBtn)
+  {
+    copyCommandBtn.addEventListener('click', async () =>
+    {
+      if (!currentFilename) return;
+
+      const command = `pp_RebindKeys ${currentFilename}`;
+
+      try
+      {
+        // Copy to clipboard
+        await navigator.clipboard.writeText(command);
+
+        // Show temporary success message
+        const originalText = copyCommandBtn.textContent;
+        copyCommandBtn.textContent = '✓ Copied!';
+        copyCommandBtn.style.opacity = '0.8';
+
+        setTimeout(() =>
+        {
+          copyCommandBtn.textContent = originalText;
+          copyCommandBtn.style.opacity = '1';
+        }, 2000);
+
+        // Log the command for user convenience
+        console.log('Command copied to clipboard:', command);
+      } catch (error)
+      {
+        console.error('Failed to copy to clipboard:', error);
+      }
+    });
+  }
   const customizedCheckbox = document.getElementById('customized-only-checkbox');
   if (customizedCheckbox)
   {
@@ -913,6 +947,10 @@ async function loadKeybindingsFile()
 
     if (!filePath) return; // User cancelled
 
+    // Extract filename from path
+    const filename = filePath.split('\\').pop() || filePath.split('/').pop();
+    currentFilename = filename;
+
     // Load the keybindings (this loads into state on backend)
     await invoke('load_keybindings', { filePath });
 
@@ -949,6 +987,13 @@ async function loadPersistedKeybindings()
     const workingBindings = localStorage.getItem('workingBindings');
     const cachedUnsavedState = localStorage.getItem('hasUnsavedChanges');
     const savedPath = localStorage.getItem('keybindingsFilePath');
+
+    // Set filename if we have a saved path
+    if (savedPath)
+    {
+      const filename = savedPath.split('\\').pop() || savedPath.split('/').pop();
+      currentFilename = filename;
+    }
 
     if (workingBindings)
     {
@@ -1059,6 +1104,9 @@ async function newKeybinding()
     localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
     localStorage.setItem('hasUnsavedChanges', 'false');
     localStorage.removeItem('keybindingsFilePath');
+
+    // Clear the current filename since we're creating new bindings
+    currentFilename = null;
 
     // Reset unsaved changes flag and update UI
     hasUnsavedChanges = false;
@@ -1208,8 +1256,21 @@ async function saveKeybindings()
         {
           console.log(`Auto-saving to ${installations.length} installation(s)...`);
 
-          // Save to each installation
-          for (const installation of installations)
+          // Filter out installations that contain the currently-opened file
+          let skippedInstallation = null;
+          const installationsToUpdate = installations.filter(installation =>
+          {
+            // Check if the current file path is within this installation
+            if (savedPath && savedPath.toLowerCase().includes(installation.path.toLowerCase()))
+            {
+              skippedInstallation = installation.name;
+              return false; // Skip this installation
+            }
+            return true;
+          });
+
+          // Save to each installation (except the one with the currently-open file)
+          for (const installation of installationsToUpdate)
           {
             await invoke('save_bindings_to_install', {
               installationPath: installation.path
@@ -1217,7 +1278,14 @@ async function saveKeybindings()
             console.log(`Saved to ${installation.name}`);
           }
 
-          showSuccessMessage(`Saved & deployed to ${installations.length} installation(s)!`);
+          // Build success message
+          let successMsg = `Saved & deployed to ${installationsToUpdate.length} installation(s)`;
+          if (skippedInstallation)
+          {
+            successMsg += ` (${skippedInstallation} was skipped as it's the currently open file location)`;
+          }
+          successMsg += '!';
+          showSuccessMessage(successMsg);
         } else
         {
           showSuccessMessage('Saved!');
@@ -1269,7 +1337,13 @@ async function saveKeybindingsAs()
 
     // Update the stored file path
     localStorage.setItem('keybindingsFilePath', filePath);
+
+    // Extract and set the filename
+    const filename = filePath.split('\\').pop() || filePath.split('/').pop();
+    currentFilename = filename;
+
     updateFileIndicator(filePath);
+    updateCopyCommandButtonVisibility();
 
     // Clear unsaved changes flag
     hasUnsavedChanges = false;
@@ -1316,6 +1390,16 @@ function showSuccessMessage(message)
   }, 2000);
 }
 
+// Helper function to update copy command button visibility
+function updateCopyCommandButtonVisibility()
+{
+  const copyCommandBtn = document.getElementById('copy-command-btn');
+  if (copyCommandBtn)
+  {
+    copyCommandBtn.style.display = currentFilename ? 'inline-flex' : 'none';
+  }
+}
+
 function displayKeybindings()
 {
   if (!currentKeybindings) return;
@@ -1331,6 +1415,9 @@ function displayKeybindings()
   // Update profile name - use a default if not available
   const profileName = currentKeybindings.profile_name || 'Star Citizen Keybindings';
   document.getElementById('profile-name').textContent = profileName;
+
+  // Update copy command button visibility
+  updateCopyCommandButtonVisibility();
 
   // Render categories
   renderCategories();

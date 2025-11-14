@@ -47,6 +47,8 @@
           <button id="load-btn" class="btn btn-primary">Load</button>
           <button id="save-as-btn" class="btn btn-primary" disabled>Save As...</button>
           <button id="save-btn" class="btn btn-success" disabled>💾 Save Keybindings</button>
+          <button id="copy-command-btn" class="btn btn-primary" title="Copy rebind command to clipboard"
+            style="display: none;">📋</button>
         </div>
         <div class="header-file-info">
           <div id="loaded-file-indicator" class="loaded-file-indicator" style="display: none;">
@@ -645,6 +647,35 @@
           </div>
 
           <div class="help-section">
+            <h3>📋 Applying Changes In-Game with Copy Command</h3>
+            <p>Once you've made changes to your keybindings, you can apply them directly in Star Citizen without
+              restarting the game:</p>
+            <ol>
+              <li><strong>Save your keybindings file</strong> using the "Save Keybindings" button (Ctrl+S)</li>
+              <li>A <strong>"📋 Copy Command"</strong> button will appear in the top toolbar (it's only visible when you
+                have a keybindings file loaded)</li>
+              <li>Click the "📋 Copy Command" button to copy the console command to your clipboard</li>
+              <li>In Star Citizen, open the console by pressing <code>~</code> (tilde)</li>
+              <li>Paste the command (Ctrl+V) and press Enter</li>
+              <li>Your keybindings will be reloaded immediately in-game!</li>
+            </ol>
+            <p class="help-note"><strong>Example command:</strong> <code>pp_RebindKeys layout_exported.xml</code></p>
+
+            <h4 style="margin-top: 1.5rem;">⚡ Speed Up with Auto-Save</h4>
+            <p>If you have multiple Star Citizen installations, the <strong>Auto Save to All Installations</strong>
+              feature (accessible via "⚙️ Auto Save Settings") can dramatically speed up your workflow:</p>
+            <ul>
+              <li>When enabled, your keybindings are automatically saved to all detected Star Citizen installations</li>
+              <li>This means you only need to enter the console command once, and all your installations will use the
+                updated keybindings</li>
+              <li>Perfect for maintaining consistent controls across multiple game clients or testing on different
+                patches</li>
+            </ul>
+            <p class="help-note"><strong>Tip:</strong> Configure your Star Citizen directory via the "⚙️ Auto Save
+              Settings" button to enable this feature.</p>
+          </div>
+
+          <div class="help-section">
             <h3>❓ Troubleshooting</h3>
             <ul>
               <li><strong>Buttons not working in-game?</strong> Check your joystick mapping. The js numbers in your
@@ -1038,8 +1069,6 @@
         <div class="whats-new-section">
           <h3>✨ New Features</h3>
           <ul>
-            <li><strong>Double-Tap Detection:</strong> You can now bind actions to double-tap inputs! Just press a
-              button twice quickly during binding detection.</li>
             <li><strong>Device Mapping Persistence:</strong> Joystick and gamepad mappings are now saved between
               sessions for the template editor.</li>
             <li><strong>Update Checker:</strong> The app now checks for updates and notifies you when a new version is
