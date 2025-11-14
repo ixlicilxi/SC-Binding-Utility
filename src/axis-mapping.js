@@ -44,20 +44,21 @@ export function convertToSCAxisFormat(inputString, customMapping = null)
 {
     if (!inputString || !inputString.includes('_axis')) return inputString;
 
-    // Extract joystick number and axis number
-    const match = inputString.match(/js(\d+)_axis(\d+)(?:_(positive|negative))?/);
+    // Extract device prefix, instance number, and axis number
+    const match = inputString.match(/(js|gp)(\d+)_axis(\d+)(?:_(positive|negative))?/);
     if (!match) return inputString;
 
-    const jsInstance = match[1];
-    const axisNumber = parseInt(match[2]);
-    const direction = match[3]; // positive or negative
+    const devicePrefix = match[1];
+    const instanceNumber = match[2];
+    const axisNumber = parseInt(match[3]);
+    const direction = match[4]; // positive or negative
 
     // Get the SC axis name (from custom mapping or defaults)
     const mapping = customMapping || DEFAULT_AXIS_MAPPING;
     const scAxisName = mapping[axisNumber] || `axis${axisNumber}`;
 
     // Star Citizen format doesn't include direction - that's handled by inversion
-    return `js${jsInstance}_${scAxisName}`;
+    return `${devicePrefix}${instanceNumber}_${scAxisName}`;
 }
 
 /**

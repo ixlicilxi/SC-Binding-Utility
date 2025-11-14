@@ -1,4 +1,4 @@
-const { invoke } = window.__TAURI__.core;
+﻿const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open, save } = window.__TAURI__.dialog;
 import { toStarCitizenFormat } from './input-utils.js';
@@ -53,7 +53,9 @@ window.logInfo = async (message) =>
 let keyboardDetectionActive = false;
 let keyboardDetectionHandler = null;
 let isDetectionActive = false; // Global flag to track if input detection is active
+let ignoreModalMouseInputs = false; // Set while hovering cancel/save to avoid accidental detections
 let currentBindingId = null; // Unique ID for the current binding attempt - helps ignore stale events
+let bindingModalSaveBtn = null;
 
 // State
 let currentKeybindings = null;
@@ -63,11 +65,19 @@ let searchTerm = '';
 let bindingMode = false;
 let currentBindingAction = null;
 let countdownInterval = null;
-let keyboardCompletionTimeout = null;
+let secondaryDetectionTimeout = null;
 let hasUnsavedChanges = false;
 let customizedOnly = false;
+let showDefaultBindings = true;
 let currentTab = 'main';
 let categoryFriendlyNames = {};
+const SECONDARY_WINDOW_MS = 1000; // One-second window for multi-input capture
+
+function setBindingSaveEnabled(enabled)
+{
+  if (!bindingModalSaveBtn) return;
+  bindingModalSaveBtn.disabled = !enabled;
+}
 
 // Convert JavaScript KeyboardEvent.code to Star Citizen keyboard format
 function convertKeyCodeToSC(code, key)
@@ -157,6 +167,106 @@ function convertKeyCodeToSC(code, key)
 
   // Fallback to lowercase key
   return key.toLowerCase();
+}
+
+function renderDetectedInputMessage(container, message)
+{
+  container.innerHTML = '';
+  const span = document.createElement('span');
+  span.className = 'action-binding-button-found';
+  span.textContent = message;
+  container.appendChild(span);
+}
+
+function clearPrimaryCountdown()
+{
+  if (!countdownInterval) return;
+  console.log('[TIMER] Clearing primary countdown timer, ID:', countdownInterval);
+  clearInterval(countdownInterval);
+  countdownInterval = null;
+}
+
+function clearSecondaryDetectionTimer()
+{
+  if (!secondaryDetectionTimeout) return;
+  console.log('[TIMER] Clearing secondary detection timer');
+  clearTimeout(secondaryDetectionTimeout);
+  secondaryDetectionTimeout = null;
+}
+
+function cleanupInputDetectionListeners()
+{
+  if (window.currentInputDetectionUnlisten)
+  {
+    window.currentInputDetectionUnlisten();
+    window.currentInputDetectionUnlisten = null;
+  }
+  if (window.currentCompletionUnlisten)
+  {
+    window.currentCompletionUnlisten();
+    window.currentCompletionUnlisten = null;
+  }
+
+  if (keyboardDetectionHandler)
+  {
+    document.removeEventListener('keydown', keyboardDetectionHandler, true);
+    keyboardDetectionHandler = null;
+  }
+  keyboardDetectionActive = false;
+
+  if (window.mouseDetectionHandler)
+  {
+    document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
+    window.mouseDetectionHandler = null;
+  }
+  if (window.mouseUpHandler)
+  {
+    document.removeEventListener('mouseup', window.mouseUpHandler, true);
+    window.mouseUpHandler = null;
+  }
+  if (window.contextMenuHandler)
+  {
+    document.removeEventListener('contextmenu', window.contextMenuHandler, true);
+    window.contextMenuHandler = null;
+  }
+  if (window.beforeUnloadHandler)
+  {
+    window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
+    window.beforeUnloadHandler = null;
+  }
+  if (window.mouseDetectionActive !== undefined)
+  {
+    window.mouseDetectionActive = false;
+  }
+}
+
+function stopDetection(reason = 'unspecified')
+{
+  const wasActive = isDetectionActive || countdownInterval || secondaryDetectionTimeout;
+  if (!wasActive)
+  {
+    cleanupInputDetectionListeners();
+    return;
+  }
+
+  ignoreModalMouseInputs = false;
+
+  console.log(`[TIMER] stopDetection called (${reason})`);
+  isDetectionActive = false;
+  clearPrimaryCountdown();
+  clearSecondaryDetectionTimer();
+  cleanupInputDetectionListeners();
+}
+
+function startSecondaryDetectionWindow()
+{
+  clearSecondaryDetectionTimer();
+  secondaryDetectionTimeout = setTimeout(() =>
+  {
+    console.log('[TIMER] Secondary detection window expired');
+    secondaryDetectionTimeout = null;
+    stopDetection('secondary-window-expired');
+  }, SECONDARY_WINDOW_MS);
 }
 
 // ============================================================================
@@ -295,11 +405,73 @@ async function showAlert(message, title = "Information", buttonText = "OK")
 window.showConfirmation = showConfirmation;
 window.showAlert = showAlert;
 
+// ============================================================================
+// WHAT'S NEW MODAL
+// ============================================================================
+
+function initializeWhatsNewModal()
+{
+  const CURRENT_VERSION = '0.6.0';
+  const WHATS_NEW_KEY = 'whatsNew';
+
+  // Check if the stored version matches the current version
+  const storedVersion = localStorage.getItem(WHATS_NEW_KEY);
+
+  if (storedVersion !== CURRENT_VERSION)
+  {
+    // Show the modal if version has changed or never been set
+    showWhatsNewModal();
+  }
+}
+
+function showWhatsNewModal()
+{
+  const CURRENT_VERSION = '0.6.0';
+  const WHATS_NEW_KEY = 'whatsNew';
+
+  const modal = document.getElementById('whats-new-modal');
+  const closeBtn = document.getElementById('whats-new-close-btn');
+
+  if (!modal || !closeBtn) return;
+
+  // Show modal
+  modal.style.display = 'flex';
+
+  // Handle close
+  const handleClose = () =>
+  {
+    modal.style.display = 'none';
+    localStorage.setItem(WHATS_NEW_KEY, CURRENT_VERSION);
+    closeBtn.removeEventListener('click', handleClose);
+    escapeHandler && document.removeEventListener('keydown', escapeHandler);
+  };
+
+  // Handle escape key
+  const escapeHandler = (e) =>
+  {
+    if (e.key === 'Escape')
+    {
+      handleClose();
+    }
+  };
+
+  closeBtn.addEventListener('click', handleClose);
+  document.addEventListener('keydown', escapeHandler);
+
+  // Focus the close button
+  setTimeout(() => closeBtn.focus(), 100);
+}
+
+// Make showWhatsNewModal globally available for testing
+window.showWhatsNewModal = showWhatsNewModal;
+
 // Main app initialization
 window.addEventListener("DOMContentLoaded", async () =>
 {
   initializeEventListeners();
   initializeTabSystem();
+  initializeWhatsNewModal();
+  initializeFontSizeScaling();
 
   // Initialize update checker
   try
@@ -318,7 +490,8 @@ window.addEventListener("DOMContentLoaded", async () =>
   const savedTemplateName = localStorage.getItem('currentTemplateName');
   if (savedTemplateName)
   {
-    updateTemplateIndicator(savedTemplateName);
+    const savedFileName = localStorage.getItem('templateFileName');
+    updateTemplateIndicator(savedTemplateName, savedFileName);
   }
 
   // Load categories
@@ -338,7 +511,7 @@ window.addEventListener("DOMContentLoaded", async () =>
   } catch (error)
   {
     console.error('Failed to load AllBinds.xml:', error);
-    alert(`Warning: Failed to load AllBinds.xml: ${error}\n\nSome features may not work correctly.`);
+    await showAlert(`Warning: Failed to load AllBinds.xml: ${error}\n\nSome features may not work correctly.`, 'Warning');
   }
 
   loadPersistedKeybindings();
@@ -347,18 +520,81 @@ window.addEventListener("DOMContentLoaded", async () =>
 function initializeTabSystem()
 {
   // Add tab click handlers
-  document.querySelectorAll('.tab-btn').forEach(btn =>
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(btn =>
   {
     btn.addEventListener('click', (e) =>
     {
       const tabName = e.target.dataset.tab;
+      if (!tabName) return;
       switchTab(tabName);
     });
   });
 
   // Save current tab to localStorage
-  const savedTab = localStorage.getItem('currentTab') || 'main';
+  const savedTab = localStorage.getItem('currentTab') || 'welcome';
   switchTab(savedTab);
+
+  // Initialize settings page elements
+  initializeSettingsPage();
+}
+
+function initializeSettingsPage()
+{
+  const resetCacheBtn = document.getElementById('reset-cache-btn');
+  const manualUpdateCheckBtn = document.getElementById('manual-update-check-btn');
+
+  // Reset cache button
+  if (resetCacheBtn)
+  {
+    resetCacheBtn.addEventListener('click', async () =>
+    {
+      const confirmed = await showConfirmation(
+        'Are you sure you want to reset the application cache?',
+        'Reset Application Cache',
+        'Reset Cache',
+        'Cancel',
+        'btn-danger'
+      );
+
+      if (confirmed)
+      {
+        try
+        {
+          // Clear all localStorage
+          localStorage.clear();
+          await showAlert('Application cache has been reset. The app will now refresh.', 'Cache Reset');
+          // Reload the page to apply the reset
+          window.location.reload();
+        } catch (error)
+        {
+          console.error('Error resetting cache:', error);
+          await showAlert(`Error resetting cache: ${error}`, 'Error');
+        }
+      }
+    });
+  }
+
+  // Manual update check button
+  if (manualUpdateCheckBtn)
+  {
+    manualUpdateCheckBtn.addEventListener('click', async () =>
+    {
+      manualUpdateCheckBtn.disabled = true;
+      try
+      {
+        if (window.manualUpdateCheck)
+        {
+          await window.manualUpdateCheck();
+        }
+      } catch (error)
+      {
+        console.error('Error during manual update check:', error);
+      } finally
+      {
+        manualUpdateCheckBtn.disabled = false;
+      }
+    });
+  }
 }
 
 async function loadCategoryMappings()
@@ -416,6 +652,12 @@ async function loadCategoryMappings()
 
 function switchTab(tabName)
 {
+  if (!tabName)
+  {
+    console.warn('switchTab called without a tab name');
+    return;
+  }
+
   currentTab = tabName;
 
   // Update active tab button
@@ -431,7 +673,7 @@ function switchTab(tabName)
   });
 
   // Update body class for CSS selectors to show/hide template info
-  document.body.classList.remove('tab-main', 'tab-visual', 'tab-template', 'tab-debugger');
+  document.body.classList.remove('tab-welcome', 'tab-main', 'tab-visual', 'tab-template', 'tab-debugger', 'tab-help', 'tab-settings');
   document.body.classList.add(`tab-${tabName}`);
 
   // Save to localStorage
@@ -471,6 +713,15 @@ function switchTab(tabName)
 
 function initializeEventListeners()
 {
+  // Version number click to show What's New
+  const versionEl = document.getElementById('app-version');
+  if (versionEl)
+  {
+    versionEl.style.cursor = 'pointer';
+    versionEl.title = 'Click to see what\'s new';
+    versionEl.addEventListener('click', showWhatsNewModal);
+  }
+
   // Load button
   const loadBtn = document.getElementById('load-btn');
   const welcomeLoadBtn = document.getElementById('welcome-load-btn');
@@ -488,6 +739,23 @@ function initializeEventListeners()
   if (scDirectoryBtn) scDirectoryBtn.addEventListener('click', () =>
   {
     window.location.href = 'sc-directory.html';
+  });
+
+  // Ko-fi header button
+  const kofiBtn = document.getElementById('kofi-header-btn');
+  if (kofiBtn) kofiBtn.addEventListener('click', () =>
+  {
+    // Switch to welcome tab
+    switchTab('welcome');
+    // Scroll to the support section
+    setTimeout(() =>
+    {
+      const supportSection = document.querySelector('.support-section');
+      if (supportSection)
+      {
+        supportSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
   });
 
   // Filter buttons
@@ -508,11 +776,29 @@ function initializeEventListeners()
 
   // Search input
   const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+
   if (searchInput)
   {
     searchInput.addEventListener('input', (e) =>
     {
       searchTerm = e.target.value.toLowerCase();
+      // Show/hide clear button based on input value
+      if (searchClearBtn)
+      {
+        searchClearBtn.style.display = e.target.value ? 'flex' : 'none';
+      }
+      renderKeybindings();
+    });
+  }
+
+  if (searchClearBtn)
+  {
+    searchClearBtn.addEventListener('click', () =>
+    {
+      searchInput.value = '';
+      searchTerm = '';
+      searchClearBtn.style.display = 'none';
       renderKeybindings();
     });
   }
@@ -528,13 +814,57 @@ function initializeEventListeners()
     });
   }
 
+  const showDefaultsCheckbox = document.getElementById('show-defaults-checkbox');
+  if (showDefaultsCheckbox)
+  {
+    showDefaultsCheckbox.checked = showDefaultBindings;
+    showDefaultsCheckbox.addEventListener('change', (e) =>
+    {
+      showDefaultBindings = e.target.checked;
+      renderKeybindings();
+    });
+  }
+
   // Binding modal buttons
   const bindingCancelBtn = document.getElementById('binding-cancel-btn');
-  const bindingResetBtn = document.getElementById('binding-reset-btn');
-  const bindingClearBtn = document.getElementById('binding-clear-btn');
+  bindingModalSaveBtn = document.getElementById('binding-modal-save-btn');
   if (bindingCancelBtn) bindingCancelBtn.addEventListener('click', cancelBinding);
-  if (bindingResetBtn) bindingResetBtn.addEventListener('click', resetBinding);
-  if (bindingClearBtn) bindingClearBtn.addEventListener('click', clearBinding);
+  if (bindingModalSaveBtn)
+  {
+    bindingModalSaveBtn.addEventListener('click', async () =>
+    {
+      if (!window.pendingBinding) return;
+
+      const { actionMapName, actionName, mappedInput, multiTap } = window.pendingBinding;
+
+      // Get the selected activation mode
+      const activationModeSelect = document.getElementById('activation-mode-select');
+      const activationMode = activationModeSelect ? activationModeSelect.value : null;
+
+      stopDetection('user-save-modal');
+      await applyBinding(actionMapName, actionName, mappedInput, multiTap, activationMode);
+      window.pendingBinding = null;
+      setBindingSaveEnabled(false);
+    });
+    setBindingSaveEnabled(false);
+  }
+
+  const setIgnoreModalMouse = (value) =>
+  {
+    ignoreModalMouseInputs = value;
+  };
+
+  const attachHoverGuard = (element) =>
+  {
+    if (!element) return;
+    element.addEventListener('pointerenter', () => setIgnoreModalMouse(true));
+    element.addEventListener('pointerleave', () => setIgnoreModalMouse(false));
+    element.addEventListener('pointerdown', () => setIgnoreModalMouse(true));
+    element.addEventListener('pointerup', () => setIgnoreModalMouse(false));
+  };
+
+  attachHoverGuard(bindingCancelBtn);
+  attachHoverGuard(bindingModalSaveBtn);
 
   // Conflict modal buttons
   const conflictCancelBtn = document.getElementById('conflict-cancel-btn');
@@ -549,6 +879,9 @@ function initializeEventListeners()
   const detectJs1Btn = document.getElementById('detect-js1-btn');
   const detectJs2Btn = document.getElementById('detect-js2-btn');
   const detectGp1Btn = document.getElementById('detect-gp1-btn');
+  const resetJs1Btn = document.getElementById('reset-js1-btn');
+  const resetJs2Btn = document.getElementById('reset-js2-btn');
+  const resetGp1Btn = document.getElementById('reset-gp1-btn');
   const joyMappingSave = document.getElementById('joystick-mapping-save');
   if (configureBtn) configureBtn.addEventListener('click', openJoystickMappingModal);
   if (joyMappingClose) joyMappingClose.addEventListener('click', closeJoystickMappingModal);
@@ -556,7 +889,14 @@ function initializeEventListeners()
   if (detectJs1Btn) detectJs1Btn.addEventListener('click', () => detectDevice('js1'));
   if (detectJs2Btn) detectJs2Btn.addEventListener('click', () => detectDevice('js2'));
   if (detectGp1Btn) detectGp1Btn.addEventListener('click', () => detectDevice('gp1'));
+  if (resetJs1Btn) resetJs1Btn.addEventListener('click', () => resetDeviceMapping('js1'));
+  if (resetJs2Btn) resetJs2Btn.addEventListener('click', () => resetDeviceMapping('js2'));
+  if (resetGp1Btn) resetGp1Btn.addEventListener('click', () => resetDeviceMapping('gp1'));
   if (joyMappingSave) joyMappingSave.addEventListener('click', saveJoystickMapping);
+
+  // New Keybinding button
+  const newKeybindingBtn = document.getElementById('new-keybinding-btn');
+  if (newKeybindingBtn) newKeybindingBtn.addEventListener('click', newKeybinding);
 }
 
 async function loadKeybindingsFile()
@@ -597,7 +937,7 @@ async function loadKeybindingsFile()
   } catch (error)
   {
     console.error('Error loading keybindings:', error);
-    alert(`Failed to load keybindings: ${error}`);
+    await showAlert(`Failed to load keybindings: ${error}`, 'Error');
   }
 }
 
@@ -690,6 +1030,75 @@ async function loadAllBindsOnly()
   }
 }
 
+async function newKeybinding()
+{
+  // Check if there are unsaved changes
+  if (hasUnsavedChanges)
+  {
+    const confirmed = await showConfirmation(
+      'You have unsaved keybinding changes. Do you want to discard them and start fresh?',
+      'Unsaved Changes',
+      'Discard & Start New',
+      'Cancel',
+      'btn-danger'
+    );
+
+    if (!confirmed) return;
+  }
+
+  try
+  {
+    // Clear backend customizations and reload AllBinds
+    await invoke('clear_custom_bindings');
+    await invoke('load_all_binds');
+
+    // Get fresh merged bindings (AllBinds only, no customizations)
+    currentKeybindings = await invoke('get_merged_bindings');
+
+    // Save as working copy
+    localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
+    localStorage.setItem('hasUnsavedChanges', 'false');
+    localStorage.removeItem('keybindingsFilePath');
+
+    // Reset unsaved changes flag and update UI
+    hasUnsavedChanges = false;
+    updateUnsavedIndicator();
+
+    // Display the fresh keybindings
+    displayKeybindings();
+    showUnsavedFileIndicator();
+
+    // Reset filters and search
+    currentFilter = 'all';
+    searchTerm = '';
+    customizedOnly = false;
+
+    // Update filter buttons
+    const filterBtns = document.querySelectorAll('.filter-section .category-item');
+    filterBtns.forEach(btn =>
+    {
+      btn.classList.remove('active');
+      if (btn.dataset.filter === 'all') btn.classList.add('active');
+    });
+
+    // Clear search input
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.value = '';
+
+    // Uncheck customized only checkbox
+    const customizedCheckbox = document.getElementById('customized-only-checkbox');
+    if (customizedCheckbox) customizedCheckbox.checked = false;
+
+    // Re-render with fresh state
+    renderKeybindings();
+
+  } catch (error)
+  {
+    console.error('Error creating new keybinding:', error);
+    await showAlert(`Failed to create new keybinding: ${error}`, 'Error');
+  }
+}
+
 function updateFileIndicator(filePath)
 {
   const indicator = document.getElementById('loaded-file-indicator');
@@ -704,14 +1113,31 @@ function updateFileIndicator(filePath)
   }
 }
 
-function updateTemplateIndicator(templateName)
+function showUnsavedFileIndicator()
+{
+  const indicator = document.getElementById('loaded-file-indicator');
+  const fileNameEl = document.getElementById('loaded-file-name');
+
+  if (indicator && fileNameEl)
+  {
+    fileNameEl.textContent = 'Unsaved Keybinding Set';
+    indicator.style.display = 'flex';
+  }
+}
+
+function updateTemplateIndicator(templateName, fileName = null)
 {
   const templateNameEl = document.getElementById('header-template-name');
-  console.log('updateTemplateIndicator called with:', templateName);
+  console.log('updateTemplateIndicator called with:', templateName, fileName);
   console.log('templateNameEl:', templateNameEl);
   if (templateNameEl)
   {
-    templateNameEl.textContent = templateName || 'Untitled Template';
+    let displayText = templateName || 'Untitled Template';
+    if (fileName)
+    {
+      displayText += ` (${fileName})`;
+    }
+    templateNameEl.textContent = displayText;
     console.log('Updated header to:', templateNameEl.textContent);
   }
   // Always save to localStorage for persistence
@@ -741,7 +1167,7 @@ async function saveKeybindings()
 {
   if (!currentKeybindings)
   {
-    alert('No keybindings loaded to save!');
+    await showAlert('No keybindings loaded to save!', 'Save Keybindings');
     return;
   }
 
@@ -809,7 +1235,7 @@ async function saveKeybindings()
   } catch (error)
   {
     console.error('Error saving keybindings:', error);
-    alert(`Failed to save keybindings: ${error}`);
+    await showAlert(`Failed to save keybindings: ${error}`, 'Error');
   }
 }
 
@@ -817,7 +1243,7 @@ async function saveKeybindingsAs()
 {
   if (!currentKeybindings)
   {
-    alert('No keybindings loaded to save!');
+    await showAlert('No keybindings loaded to save!', 'Save Keybindings As');
     return;
   }
 
@@ -857,7 +1283,7 @@ async function saveKeybindingsAs()
   } catch (error)
   {
     console.error('Error saving keybindings:', error);
-    alert(`Failed to save keybindings: ${error}`);
+    await showAlert(`Failed to save keybindings: ${error}`, 'Error');
   }
 }
 
@@ -1038,9 +1464,55 @@ function renderDeviceInfo()
   deviceList.innerHTML = html;
 }
 
+// Helper function to check if an action has any bindings that will be displayed
+function actionHasVisibleBindings(action)
+{
+  if (!action.bindings || action.bindings.length === 0) return false;
+
+  return action.bindings.some(binding =>
+  {
+    const trimmedInput = binding.input.trim();
+
+    // Check if this is a cleared binding
+    const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !binding.is_default;
+
+    // Skip truly unbound bindings, but keep cleared bindings that override defaults
+    if (!trimmedInput || trimmedInput === '') return false;
+    if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return false;
+
+    // Filter out default bindings if showDefaultBindings is false
+    if (!showDefaultBindings && binding.is_default && !isClearedBinding) return false;
+
+    // Filter display based on current filter
+    if (currentFilter !== 'all')
+    {
+      if (currentFilter === 'keyboard' && binding.input_type !== 'Keyboard') return false;
+      if (currentFilter === 'mouse' && binding.input_type !== 'Mouse') return false;
+      if (currentFilter === 'joystick' && binding.input_type !== 'Joystick') return false;
+      if (currentFilter === 'gamepad' && binding.input_type !== 'Gamepad') return false;
+    }
+
+    return true;
+  });
+}
+
 function renderKeybindings()
 {
   if (!currentKeybindings) return;
+
+  // Debug: log a sample binding to see its structure
+  if (currentKeybindings.action_maps && currentKeybindings.action_maps.length > 0)
+  {
+    const firstMap = currentKeybindings.action_maps[0];
+    if (firstMap.actions && firstMap.actions.length > 0)
+    {
+      const firstAction = firstMap.actions[0];
+      if (firstAction.bindings && firstAction.bindings.length > 0)
+      {
+        console.log('Sample binding structure:', firstAction.bindings[0]);
+      }
+    }
+  }
 
   const container = document.getElementById('action-maps-container');
 
@@ -1125,6 +1597,12 @@ function renderKeybindings()
 
     if (actions.length === 0) return; // Skip empty action maps
 
+    // Filter actions to only those with visible bindings, and collect them
+    const visibleActions = actions.filter(action => actionHasVisibleBindings(action));
+
+    // Skip this action map if there are no visible actions
+    if (visibleActions.length === 0) return;
+
     html += `
       <div class="action-map">
         <div class="action-map-header" onclick="toggleActionMap(this)">
@@ -1134,7 +1612,7 @@ function renderKeybindings()
         <div class="actions-list">
     `;
 
-    actions.forEach(action =>
+    visibleActions.forEach(action =>
     {
       const displayName = action.ui_label || action.display_name || action.name;
       const isCustomized = action.is_customized || false;
@@ -1146,17 +1624,41 @@ function renderKeybindings()
             ${isCustomized ? '<span class="customized-indicator" title="Customized binding">★</span>' : ''}
             ${displayName}${onHold ? ' <span class="hold-indicator" title="Requires holding">(Hold)</span>' : ''}
           </div>
-          <button class="bind-button btn btn-primary" 
+          <div class="action-buttons">
+          <button class="action-btn btn-manage btn btn-secondary" 
+                  data-action-map="${actionMap.name}"
+                  data-action-name="${action.name}"
+                  data-action-display="${displayName}"
+                  title="Manage all bindings for this action"
+                  onclick="openActionBindingsModal(this.dataset.actionMap, this.dataset.actionName, this.dataset.actionDisplay)">
+            ⚙️ Manage
+          </button>
+          <button class="action-btn btn-reset btn btn-secondary" 
+                  data-action-map="${actionMap.name}"
+                  data-action-name="${action.name}"
+                  title="Reset to default bindings"
+                  onclick="resetActionBinding(this.dataset.actionMap, this.dataset.actionName)">
+            ↻ Reset
+          </button>
+          <button class="action-btn btn-clear btn btn-secondary" 
+          data-action-map="${actionMap.name}"
+          data-action-name="${action.name}"
+          title="Clear all bindings for this action"
+          onclick="clearActionBinding(this.dataset.actionMap, this.dataset.actionName)">
+          ✕ Clear
+          </button>
+          <button class="action-btn btn-bind btn btn-success" 
                   data-action-map="${actionMap.name}"
                   data-action-name="${action.name}"
                   data-action-display="${displayName}"
                   onclick="startBinding(this.dataset.actionMap, this.dataset.actionName, this.dataset.actionDisplay)">
             Bind
           </button>
+          </div>
           <div class="bindings-container">
       `;
 
-      if (!action.bindings || action.bindings.length === 0 || action.bindings.every(b => !b.input || b.input.trim() === '' || (b.input.trim().endsWith('_') && !b.is_default) || (b.input.trim().match(/js[12]_\s*$/) && !b.is_default)))
+      if (!action.bindings || action.bindings.length === 0 || action.bindings.every(b => !b.input || b.input.trim() === '' || (b.input.trim().match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !b.is_default)))
       {
         html += `<span class="binding-tag unbound">Unbound</span>`;
       } else
@@ -1166,11 +1668,15 @@ function renderKeybindings()
           const trimmedInput = binding.input.trim();
 
           // Check if this is a cleared binding (overriding a default with blank)
-          const isClearedBinding = (trimmedInput.endsWith('_') || trimmedInput.match(/js[12]_\s*$/)) && !binding.is_default;
+          // Matches: js1_ , kb1_ , mouse1_ , gp1_ , etc. (with optional trailing space)
+          const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !binding.is_default;
 
           // Skip truly unbound bindings, but keep cleared bindings that override defaults
           if (!trimmedInput || trimmedInput === '') return;
-          if ((trimmedInput.endsWith('_') || trimmedInput.match(/js[12]_\s*$/)) && binding.is_default) return;
+          if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return;
+
+          // Filter out default bindings if showDefaultBindings is false
+          if (!showDefaultBindings && binding.is_default && !isClearedBinding) return;
 
           // Filter display based on current filter
           if (currentFilter !== 'all')
@@ -1205,10 +1711,32 @@ function renderKeybindings()
           // Show if it's a default binding or a cleared override
           const defaultIndicator = binding.is_default ? ' (default)' : '';
 
+          // Show multi-tap indicator if present
+          const multiTapIndicator = binding.multi_tap ? ` <span class="multi-tap-indicator" title="Double-tap binding">(${binding.multi_tap}x tap)</span>` : '';
+
+          // Format display name with activation mode appended
+          let displayText = binding.display_name;
+
+          // Debug: log the binding object to see what we have
+          if (binding.activation_mode)
+          {
+            console.log('Binding with activation_mode:', binding);
+          }
+
+          if (binding.activation_mode && !isClearedBinding)
+          {
+            // Format activation mode for display (e.g., "delayed_press" -> "Delayed Press")
+            const formattedMode = binding.activation_mode
+              .split('_')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+            displayText += ` - ${formattedMode}`;
+          }
+
           html += `
             <span class="binding-tag ${typeClass} ${binding.is_default ? 'default-binding' : ''} ${isClearedBinding ? 'cleared-binding' : ''}">
               <span class="binding-icon">${icon}</span>
-              ${isClearedBinding ? 'Cleared Override' : binding.display_name}${defaultIndicator}
+              ${isClearedBinding ? 'Cleared Override' : displayText}${defaultIndicator}${multiTapIndicator}
               <button class="binding-remove-btn" 
                       title="Clear this binding"
                       data-action-map="${actionMap.name}"
@@ -1275,55 +1803,17 @@ window.toggleActionMap = function (headerEl)
 // Binding mode functions
 async function startBinding(actionMapName, actionName, actionDisplayName)
 {
+  // Ensure any previous detection session is fully cleaned up
+  stopDetection('start-new-binding');
+
   // Generate unique ID for this binding attempt to ignore stale events
   currentBindingId = Date.now() + Math.random();
   console.log('[TIMER] startBinding called for:', actionDisplayName, 'new currentBindingId:', currentBindingId);
 
-  // Mark any previous detection as inactive
-  isDetectionActive = false;
-
-  // Clear any existing countdown timer first
-  if (countdownInterval)
-  {
-    console.log('[TIMER] Clearing existing countdownInterval at start of startBinding, ID:', countdownInterval);
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  else
-  {
-    console.log('[TIMER] No existing countdownInterval to clear at start of startBinding');
-  }
-
-  // Clear any existing keyboard completion timeout
-  if (keyboardCompletionTimeout)
-  {
-    console.log('[TIMER] Clearing existing keyboardCompletionTimeout at start of startBinding');
-    clearTimeout(keyboardCompletionTimeout);
-    keyboardCompletionTimeout = null;
-  }
-
-  // Clean up any leftover listeners from previous binding attempts
-  if (window.currentInputDetectionUnlisten)
-  {
-    window.currentInputDetectionUnlisten();
-    window.currentInputDetectionUnlisten = null;
-  }
-  if (window.currentCompletionUnlisten)
-  {
-    window.currentCompletionUnlisten();
-    window.currentCompletionUnlisten = null;
-  }
-
-  // Clean up keyboard detection from previous attempt
-  if (keyboardDetectionHandler)
-  {
-    document.removeEventListener('keydown', keyboardDetectionHandler, true);
-    keyboardDetectionHandler = null;
-  }
-  keyboardDetectionActive = false;
-
   currentBindingAction = { actionMapName, actionName, actionDisplayName };
   bindingMode = true;
+  setBindingSaveEnabled(false);
+  ignoreModalMouseInputs = false;
 
   // Capture the binding ID for this attempt (for closure)
   const thisBindingId = currentBindingId;
@@ -1332,7 +1822,22 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
   const modal = document.getElementById('binding-modal');
   modal.style.display = 'flex';
 
-  document.getElementById('binding-modal-action').textContent = actionDisplayName;
+  // Reset activation mode dropdown to default
+  const activationModeSelect = document.getElementById('activation-mode-select');
+  if (activationModeSelect)
+  {
+    activationModeSelect.value = '';
+  }
+
+  // Clear any previous conflict display
+  const conflictDisplay = document.getElementById('binding-conflict-display');
+  if (conflictDisplay)
+  {
+    conflictDisplay.style.display = 'none';
+    conflictDisplay.innerHTML = '';
+  }
+
+  document.getElementById('binding-modal-action').textContent = 'Binding Action: ' + actionDisplayName;
   document.getElementById('binding-modal-status').textContent = 'Press any button, key, mouse button, or move any axis...';
 
   // Start countdown
@@ -1370,17 +1875,76 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
     let selectionContainer = null;
     let statusEl = document.getElementById('binding-modal-status');
 
+    // Multi-input selection state
+    let selectedInputKey = null;
+    const selectionButtons = new Map();
+    let selectionMessageEl = null;
+
+    const setSelectionMessage = (text) =>
+    {
+      if (selectionMessageEl)
+      {
+        selectionMessageEl.textContent = text;
+      }
+    };
+
+    const setPendingBindingSelection = async (input) =>
+    {
+      const conflicts = await invoke('find_conflicting_bindings', {
+        input: input.scFormattedInput,
+        excludeActionMap: actionMapName,
+        excludeAction: actionName
+      });
+
+      window.pendingBinding = {
+        actionMapName,
+        actionName,
+        mappedInput: input.scFormattedInput,
+        displayName: input.displayName,
+        conflicts
+      };
+
+      setBindingSaveEnabled(true);
+
+      return conflicts;
+    };
+
+    const updateConflictDisplay = (conflicts = []) =>
+    {
+      const existingWarning = statusEl.querySelector('.binding-conflict-warning');
+      if (existingWarning)
+      {
+        existingWarning.remove();
+      }
+
+      if (!conflicts || conflicts.length === 0)
+      {
+        displayConflictsInModal([]);
+        return;
+      }
+
+      displayConflictsInModal(conflicts);
+    };
+
+    const updateSelectionButtonStates = () =>
+    {
+      selectionButtons.forEach((btn, key) =>
+      {
+        btn.classList.toggle('selected', key === selectedInputKey);
+      });
+    };
+
     // Activate keyboard detection
     keyboardDetectionActive = true;
 
     // Activate mouse button detection
-    let mouseDetectionActive = true;
     let mouseDetectionHandler = null;
 
     // Create mouse event handler
-    mouseDetectionHandler = (event) =>
+    mouseDetectionHandler = async (event) =>
     {
-      if (!window.mouseDetectionActive) return;
+      // Ignore if detection window has ended or we're hovering modal buttons
+      if (!isDetectionActive || !window.mouseDetectionActive || ignoreModalMouseInputs) return;
 
       // Only capture mouse events within the modal itself
       const modal = document.getElementById('binding-modal');
@@ -1427,141 +1991,66 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       // Process this mouse input through the same pipeline
       const processed = processInput(syntheticResult);
 
-      if (processed && !allDetectedInputs.has(processed.scFormattedInput))
+      if (!processed) return;
+
+      // Only add to map if not already there
+      if (!allDetectedInputs.has(processed.scFormattedInput))
       {
         allDetectedInputs.set(processed.scFormattedInput, processed);
 
         if (allDetectedInputs.size === 1)
         {
-          // First input detected - show it with confirm/cancel buttons
-          statusEl.textContent = `Detected: ${processed.displayName}`;
+          statusEl.innerHTML = '';
+          renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
 
-          // Stop the main countdown timer
-          if (countdownInterval)
-          {
-            console.log('[TIMER] [MOUSE] Clearing countdownInterval after first input, ID:', countdownInterval);
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
-          else
-          {
-            console.log('[TIMER] [MOUSE] countdownInterval already null!');
-          }
+          clearPrimaryCountdown();
           document.getElementById('binding-modal-countdown').textContent = '';
+          startSecondaryDetectionWindow();
 
-          // Create confirm/cancel UI
-          const confirmUI = document.createElement('div');
-          confirmUI.className = 'input-confirm-container';
-          confirmUI.innerHTML = `
-            <button class="btn btn-primary" id="confirm-single-input">✓ Use This Input</button>
-            <div class="input-confirm-note">Or press another input within 1 second to choose...</div>
-          `;
-          statusEl.appendChild(confirmUI);
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+          statusEl.appendChild(helperNote);
 
-          // Confirm button handler
-          document.getElementById('confirm-single-input').addEventListener('click', async () =>
-          {
-            // Mark detection as inactive to ignore any pending events
-            isDetectionActive = false;
-
-            // Clean up ALL timers and listeners
-            if (keyboardCompletionTimeout)
-            {
-              clearTimeout(keyboardCompletionTimeout);
-              keyboardCompletionTimeout = null;
-            }
-            if (countdownInterval)
-            {
-              clearInterval(countdownInterval);
-              countdownInterval = null;
-            }
-            keyboardDetectionActive = false;
-            mouseDetectionActive = false;
-            if (keyboardDetectionHandler)
-            {
-              document.removeEventListener('keydown', keyboardDetectionHandler, true);
-              keyboardDetectionHandler = null;
-            }
-            if (mouseDetectionHandler)
-            {
-              document.removeEventListener('mousedown', mouseDetectionHandler, true);
-              document.removeEventListener('contextmenu', contextMenuHandler, true);
-              mouseDetectionHandler = null;
-            }
-            if (window.currentInputDetectionUnlisten)
-            {
-              window.currentInputDetectionUnlisten();
-              window.currentInputDetectionUnlisten = null;
-            }
-            if (window.currentCompletionUnlisten)
-            {
-              window.currentCompletionUnlisten();
-              window.currentCompletionUnlisten = null;
-            }
-
-            const [, singleInput] = Array.from(allDetectedInputs.entries())[0];
-
-            // Check for conflicts
-            const conflicts = await invoke('find_conflicting_bindings', {
-              input: singleInput.scFormattedInput,
-              excludeActionMap: actionMapName,
-              excludeAction: actionName
-            });
-
-            if (conflicts.length > 0)
-            {
-              window.pendingBinding = {
-                actionMapName,
-                actionName,
-                mappedInput: singleInput.scFormattedInput,
-                displayName: singleInput.displayName
-              };
-              showConflictModal(conflicts);
-              return;
-            }
-
-            // No conflicts, proceed with binding
-            await applyBinding(actionMapName, actionName, singleInput.scFormattedInput);
-          });
-
-          // Start a 1-second timer to auto-show selection UI if more inputs come
-          if (keyboardCompletionTimeout) clearTimeout(keyboardCompletionTimeout);
-          keyboardCompletionTimeout = setTimeout(() =>
-          {
-            // After 1 second with no more inputs, just leave the confirm UI showing
-            keyboardCompletionTimeout = null;
-          }, 1000);
+          selectedInputKey = processed.scFormattedInput;
+          const conflicts = await setPendingBindingSelection(processed);
+          updateConflictDisplay(conflicts);
+          updateSelectionButtonStates();
         }
         else if (allDetectedInputs.size === 2)
         {
           // Second input detected - remove confirm UI and switch to selection UI
-          if (keyboardCompletionTimeout)
-          {
-            clearTimeout(keyboardCompletionTimeout);
-            keyboardCompletionTimeout = null;
-          }
-
-          // Stop the main countdown timer if still running
-          if (countdownInterval)
-          {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
+          clearPrimaryCountdown();
 
           // Clear any existing UI and show selection
           statusEl.innerHTML = '';
-          statusEl.textContent = 'Multiple inputs detected - select one:';
           document.getElementById('binding-modal-countdown').textContent = '';
+
+          selectionMessageEl = document.createElement('div');
+          selectionMessageEl.className = 'input-selection-message';
+          const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
+          selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
+          statusEl.appendChild(selectionMessageEl);
+
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
+          statusEl.appendChild(helperNote);
 
           selectionContainer = document.createElement('div');
           selectionContainer.className = 'input-selection-container';
           statusEl.appendChild(selectionContainer);
+
+          selectionButtons.clear();
 
           // Add both inputs
           Array.from(allDetectedInputs.values()).forEach((input) =>
           {
             addDetectedInputButton(input);
           });
+
+          updateSelectionButtonStates();
+          updateConflictDisplay(window.pendingBinding?.conflicts || []);
         }
         else
         {
@@ -1608,7 +2097,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
     window.contextMenuHandler = contextMenuHandler;
     window.mouseUpHandler = mouseUpHandler;
     window.beforeUnloadHandler = beforeUnloadHandler;
-    window.mouseDetectionActive = mouseDetectionActive;
+    window.mouseDetectionActive = true;
 
     // Add mouse listeners (capture phase)
     document.addEventListener('mousedown', mouseDetectionHandler, true);
@@ -1617,9 +2106,10 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
     window.addEventListener('beforeunload', beforeUnloadHandler, true);
 
     // Create keyboard event handler
-    keyboardDetectionHandler = (event) =>
+    keyboardDetectionHandler = async (event) =>
     {
-      if (!keyboardDetectionActive) return;
+      // Ignore if detection window has ended
+      if (!isDetectionActive || !keyboardDetectionActive) return;
 
       // Prevent default browser behavior
       event.preventDefault();
@@ -1665,143 +2155,66 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       // Process this keyboard input through the same pipeline
       const processed = processInput(syntheticResult);
 
-      if (processed && !allDetectedInputs.has(processed.scFormattedInput))
+      if (!processed) return;
+
+      // Only add to map if not already there
+      if (!allDetectedInputs.has(processed.scFormattedInput))
       {
         allDetectedInputs.set(processed.scFormattedInput, processed);
 
         if (allDetectedInputs.size === 1)
         {
-          // First input detected - show it with confirm/cancel buttons
-          statusEl.textContent = `Detected: ${processed.displayName}`;
+          statusEl.innerHTML = '';
+          renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
 
-          // Stop the main countdown timer
-          if (countdownInterval)
-          {
-            console.log('[TIMER] [KEYBOARD] Clearing countdownInterval after first input, ID:', countdownInterval);
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
-          else
-          {
-            console.log('[TIMER] [KEYBOARD] countdownInterval already null!');
-          }
+          clearPrimaryCountdown();
           document.getElementById('binding-modal-countdown').textContent = '';
+          startSecondaryDetectionWindow();
 
-          // Create confirm/cancel UI
-          const confirmUI = document.createElement('div');
-          confirmUI.className = 'input-confirm-container';
-          confirmUI.innerHTML = `
-            <button class="btn btn-primary" id="confirm-single-input">✓ Use This Input</button>
-            <div class="input-confirm-note">Or press another input within 1 second to choose...</div>
-          `;
-          statusEl.appendChild(confirmUI);
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+          statusEl.appendChild(helperNote);
 
-          // Confirm button handler
-          document.getElementById('confirm-single-input').addEventListener('click', async () =>
-          {
-            // Mark detection as inactive to ignore any pending events
-            isDetectionActive = false;
-
-            // Clean up ALL timers and listeners
-            if (keyboardCompletionTimeout)
-            {
-              clearTimeout(keyboardCompletionTimeout);
-              keyboardCompletionTimeout = null;
-            }
-            if (countdownInterval)
-            {
-              clearInterval(countdownInterval);
-              countdownInterval = null;
-            }
-            keyboardDetectionActive = false;
-            window.mouseDetectionActive = false;
-            if (keyboardDetectionHandler)
-            {
-              document.removeEventListener('keydown', keyboardDetectionHandler, true);
-              keyboardDetectionHandler = null;
-            }
-            if (mouseDetectionHandler)
-            {
-              document.removeEventListener('mousedown', mouseDetectionHandler, true);
-              document.removeEventListener('mouseup', window.mouseUpHandler, true);
-              document.removeEventListener('contextmenu', contextMenuHandler, true);
-              window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-              mouseDetectionHandler = null;
-            }
-            if (window.currentInputDetectionUnlisten)
-            {
-              window.currentInputDetectionUnlisten();
-              window.currentInputDetectionUnlisten = null;
-            }
-            if (window.currentCompletionUnlisten)
-            {
-              window.currentCompletionUnlisten();
-              window.currentCompletionUnlisten = null;
-            }
-
-            const [, singleInput] = Array.from(allDetectedInputs.entries())[0];
-
-            // Check for conflicts
-            const conflicts = await invoke('find_conflicting_bindings', {
-              input: singleInput.scFormattedInput,
-              excludeActionMap: actionMapName,
-              excludeAction: actionName
-            });
-
-            if (conflicts.length > 0)
-            {
-              window.pendingBinding = {
-                actionMapName,
-                actionName,
-                mappedInput: singleInput.scFormattedInput,
-                displayName: singleInput.displayName
-              };
-              showConflictModal(conflicts);
-              return;
-            }
-
-            // No conflicts, proceed with binding
-            await applyBinding(actionMapName, actionName, singleInput.scFormattedInput);
-          });
-
-          // Start a 1-second timer to auto-show selection UI if more inputs come
-          if (keyboardCompletionTimeout) clearTimeout(keyboardCompletionTimeout);
-          keyboardCompletionTimeout = setTimeout(() =>
-          {
-            // After 1 second with no more inputs, just leave the confirm UI showing
-            keyboardCompletionTimeout = null;
-          }, 1000);
+          selectedInputKey = processed.scFormattedInput;
+          const conflicts = await setPendingBindingSelection(processed);
+          updateConflictDisplay(conflicts);
+          updateSelectionButtonStates();
         }
         else if (allDetectedInputs.size === 2)
         {
           // Second input detected - remove confirm UI and switch to selection UI
-          if (keyboardCompletionTimeout)
-          {
-            clearTimeout(keyboardCompletionTimeout);
-            keyboardCompletionTimeout = null;
-          }
-
-          // Stop the main countdown timer if still running
-          if (countdownInterval)
-          {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
+          clearPrimaryCountdown();
 
           // Clear any existing UI and show selection
           statusEl.innerHTML = '';
-          statusEl.textContent = 'Multiple inputs detected - select one:';
           document.getElementById('binding-modal-countdown').textContent = '';
+
+          selectionMessageEl = document.createElement('div');
+          selectionMessageEl.className = 'input-selection-message';
+          const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
+          selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
+          statusEl.appendChild(selectionMessageEl);
+
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
+          statusEl.appendChild(helperNote);
 
           selectionContainer = document.createElement('div');
           selectionContainer.className = 'input-selection-container';
           statusEl.appendChild(selectionContainer);
+
+          selectionButtons.clear();
 
           // Add both inputs
           Array.from(allDetectedInputs.values()).forEach((input) =>
           {
             addDetectedInputButton(input);
           });
+
+          updateSelectionButtonStates();
+          updateConflictDisplay(window.pendingBinding?.conflicts || []);
         }
         else
         {
@@ -1895,71 +2308,34 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       {
         const selectedInput = allDetectedInputs.get(inputKey);
 
-        // Remove selection UI
-        if (selectionContainer)
-        {
-          selectionContainer.remove();
-          selectionContainer = null;
-        }
-        statusEl.textContent = `Selected: ${selectedInput.displayName}`;
+        if (!selectedInput) return;
 
-        // Clear timer
-        if (countdownInterval)
-        {
-          clearInterval(countdownInterval);
-          countdownInterval = null;
-        }
+        selectedInputKey = inputKey;
+        updateSelectionButtonStates();
+        setSelectionMessage(`Selected: ${selectedInput.displayName}`);
 
-        // Unlisten from events
-        if (window.currentInputDetectionUnlisten)
-        {
-          window.currentInputDetectionUnlisten();
-          window.currentInputDetectionUnlisten = null;
-        }
-        if (window.currentCompletionUnlisten)
-        {
-          window.currentCompletionUnlisten();
-          window.currentCompletionUnlisten = null;
-        }
+        stopDetection('user-selection-option');
 
-        // Cleanup keyboard detection
-        if (keyboardDetectionHandler)
-        {
-          document.removeEventListener('keydown', keyboardDetectionHandler, true);
-          keyboardDetectionHandler = null;
-        }
-        keyboardDetectionActive = false;
-
-        // Check for conflicts
-        const conflicts = await invoke('find_conflicting_bindings', {
-          input: selectedInput.scFormattedInput,
-          excludeActionMap: actionMapName,
-          excludeAction: actionName
-        });
-
-        if (conflicts.length > 0)
-        {
-          window.pendingBinding = {
-            actionMapName,
-            actionName,
-            mappedInput: selectedInput.scFormattedInput,
-            displayName: selectedInput.displayName
-          };
-          showConflictModal(conflicts);
-          return;
-        }
-
-        // No conflicts, apply binding
-        await applyBinding(actionMapName, actionName, selectedInput.scFormattedInput);
+        const conflicts = await setPendingBindingSelection(selectedInput);
+        updateConflictDisplay(conflicts);
       });
 
+      selectionButtons.set(inputKey, btn);
       selectionContainer.appendChild(btn);
+      updateSelectionButtonStates();
     };
 
     // Listen for input-detected events (from joystick/backend)
-    const unlistenInputs = await listen('input-detected', (event) =>
+    const unlistenInputs = await listen('input-detected', async (event) =>
     {
-      console.log('[TIMER] [EVENT] input-detected received, session_id:', event.payload.session_id, 'thisBindingId:', thisBindingId.toString());
+      console.log('[TIMER] [EVENT] input-detected received, session_id:', event.payload.session_id, 'thisBindingId:', thisBindingId.toString(), 'isDetectionActive:', isDetectionActive);
+
+      // Ignore if detection window has ended
+      if (!isDetectionActive)
+      {
+        console.log('[TIMER] [EVENT] Ignoring input-detected because detection is no longer active');
+        return;
+      }
 
       // Ignore if this event is from a previous binding attempt (check session ID)
       if (event.payload.session_id !== thisBindingId.toString())
@@ -1978,121 +2354,66 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       const result = event.payload;
       const processed = processInput(result);
 
-      if (processed && !allDetectedInputs.has(processed.scFormattedInput))
+      if (!processed) return;
+
+      // Only add to map if not already there
+      if (!allDetectedInputs.has(processed.scFormattedInput))
       {
         allDetectedInputs.set(processed.scFormattedInput, processed);
 
         if (allDetectedInputs.size === 1)
         {
-          // First input detected - show it with confirm/cancel buttons
-          statusEl.textContent = `Detected: ${processed.displayName}`;
+          statusEl.innerHTML = '';
+          renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
 
-          // Stop the main countdown timer
-          if (countdownInterval)
-          {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
+          clearPrimaryCountdown();
           document.getElementById('binding-modal-countdown').textContent = '';
+          startSecondaryDetectionWindow();
 
-          // Create confirm/cancel UI
-          const confirmUI = document.createElement('div');
-          confirmUI.className = 'input-confirm-container';
-          confirmUI.innerHTML = `
-            <button class="btn btn-primary" id="confirm-single-input">\u2713 Use This Input</button>
-            <div class="input-confirm-note">Or press another input within 1 second to choose...</div>
-          `;
-          statusEl.appendChild(confirmUI);
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+          statusEl.appendChild(helperNote);
 
-          // Confirm button handler
-          document.getElementById('confirm-single-input').addEventListener('click', async () =>
-          {
-            // Mark detection as inactive to ignore any pending events
-            isDetectionActive = false;
-
-            // Clean up ALL timers and listeners
-            if (keyboardCompletionTimeout)
-            {
-              clearTimeout(keyboardCompletionTimeout);
-              keyboardCompletionTimeout = null;
-            }
-            if (countdownInterval)
-            {
-              clearInterval(countdownInterval);
-              countdownInterval = null;
-            }
-            keyboardDetectionActive = false;
-            if (keyboardDetectionHandler)
-            {
-              document.removeEventListener('keydown', keyboardDetectionHandler, true);
-              keyboardDetectionHandler = null;
-            }
-            if (window.currentInputDetectionUnlisten)
-            {
-              window.currentInputDetectionUnlisten();
-              window.currentInputDetectionUnlisten = null;
-            }
-            if (window.currentCompletionUnlisten)
-            {
-              window.currentCompletionUnlisten();
-              window.currentCompletionUnlisten = null;
-            }
-
-            const [, singleInput] = Array.from(allDetectedInputs.entries())[0];
-
-            // Check for conflicts
-            const conflicts = await invoke('find_conflicting_bindings', {
-              input: singleInput.scFormattedInput,
-              excludeActionMap: actionMapName,
-              excludeAction: actionName
-            });
-
-            if (conflicts.length > 0)
-            {
-              window.pendingBinding = {
-                actionMapName,
-                actionName,
-                mappedInput: singleInput.scFormattedInput,
-                displayName: singleInput.displayName
-              };
-              showConflictModal(conflicts);
-              return;
-            }
-
-            // No conflicts, proceed with binding
-            await applyBinding(actionMapName, actionName, singleInput.scFormattedInput);
-          });
+          selectedInputKey = processed.scFormattedInput;
+          const conflicts = await setPendingBindingSelection(processed);
+          updateConflictDisplay(conflicts);
+          updateSelectionButtonStates();
         }
         else if (allDetectedInputs.size === 2)
         {
           // Second input detected - remove confirm UI and switch to selection UI
-          if (keyboardCompletionTimeout)
-          {
-            clearTimeout(keyboardCompletionTimeout);
-            keyboardCompletionTimeout = null;
-          }
-
-          // Stop the main countdown timer if still running
-          if (countdownInterval)
-          {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
+          clearPrimaryCountdown();
 
           // Clear any existing UI and show selection
           statusEl.innerHTML = '';
-          statusEl.textContent = 'Multiple inputs detected - select one:';
           document.getElementById('binding-modal-countdown').textContent = '';
+
+          selectionMessageEl = document.createElement('div');
+          selectionMessageEl.className = 'input-selection-message';
+          const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
+          selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
+          statusEl.appendChild(selectionMessageEl);
+
+          const helperNote = document.createElement('div');
+          helperNote.className = 'input-confirm-note';
+          helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
+          statusEl.appendChild(helperNote);
 
           selectionContainer = document.createElement('div');
           selectionContainer.className = 'input-selection-container';
           statusEl.appendChild(selectionContainer);
+
+          selectionButtons.clear();
 
           // Add both inputs
           Array.from(allDetectedInputs.values()).forEach((input) =>
           {
             addDetectedInputButton(input);
           });
+
+          updateSelectionButtonStates();
+          updateConflictDisplay(window.pendingBinding?.conflicts || []);
         }
         else
         {
@@ -2108,7 +2429,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
     // Listen for completion event
     const unlistenCompletion = await listen('input-detection-complete', async (event) =>
     {
-      console.log('[TIMER] [EVENT] input-detection-complete received, session_id:', event.payload?.session_id, 'thisBindingId:', thisBindingId.toString(), 'currentBindingId:', currentBindingId, 'isDetectionActive:', isDetectionActive);
+      console.log('[TIMER] [EVENT] input-detection-complete received, session_id:', event.payload?.session_id, 'thisBindingId:', thisBindingId.toString(), 'currentBindingId:', currentBindingId, 'isDetectionActive:', isDetectionActive, 'detectedInputs:', allDetectedInputs.size);
 
       // Ignore if this event is from a previous binding attempt (check session ID)
       if (event.payload?.session_id !== thisBindingId.toString())
@@ -2122,7 +2443,9 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       {
         console.log('[TIMER] [EVENT] Ignoring stale input-detection-complete event (ID mismatch)');
         return;
-      }      // Ignore if detection was already completed/cancelled
+      }
+
+      // Ignore if detection was already completed/cancelled
       if (!isDetectionActive)
       {
         console.log('[TIMER] [EVENT] Ignoring input-detection-complete, detection not active');
@@ -2137,75 +2460,37 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
         return;
       }
 
-      console.log('[TIMER] [EVENT] Processing input-detection-complete event');      // Mark as inactive
-      isDetectionActive = false;
-
-      // Clear timer
-      if (countdownInterval)
+      // If we have at least one input detected, IGNORE completion event
+      // Keep listening for potential double-tap within the 1-second window
+      if (allDetectedInputs.size > 0)
       {
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-      }
-
-      // Cleanup listeners
-      if (window.currentInputDetectionUnlisten)
-      {
-        window.currentInputDetectionUnlisten();
-        window.currentInputDetectionUnlisten = null;
-      }
-      if (window.currentCompletionUnlisten)
-      {
-        window.currentCompletionUnlisten();
-        window.currentCompletionUnlisten = null;
-      }
-
-      // Cleanup keyboard detection
-      if (keyboardDetectionHandler)
-      {
-        document.removeEventListener('keydown', keyboardDetectionHandler, true);
-        keyboardDetectionHandler = null;
-      }
-      keyboardDetectionActive = false;
-
-      // Cleanup mouse detection
-      if (mouseDetectionHandler)
-      {
-        document.removeEventListener('mousedown', mouseDetectionHandler, true);
-        document.removeEventListener('mouseup', window.mouseUpHandler, true);
-        document.removeEventListener('contextmenu', contextMenuHandler, true);
-        window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-        mouseDetectionHandler = null;
-      }
-      window.mouseDetectionActive = false;
-
-      if (allDetectedInputs.size === 0)
-      {
-        // No input detected
-        console.log('[TIMER] [EVENT] No inputs detected, showing timeout message');
-        statusEl.textContent = 'No input detected - timed out';
-        document.getElementById('binding-modal-countdown').textContent = '';
-
-        // Store the binding ID to check it hasn't changed
-        const timeoutBindingId = currentBindingId;
-        setTimeout(() =>
-        {
-          // Only close if we're still on the same binding session
-          if (currentBindingId === timeoutBindingId && bindingMode)
-          {
-            console.log('[TIMER] [EVENT] Closing modal after 2s timeout, binding ID match');
-            closeBindingModal();
-          }
-          else
-          {
-            console.log('[TIMER] [EVENT] NOT closing modal - binding ID changed or modal already closed');
-          }
-        }, 2000);
+        console.log('[TIMER] [EVENT] Ignoring input-detection-complete - waiting for potential double-tap (inputs detected:', allDetectedInputs.size, ')');
         return;
       }
 
-      // If inputs were detected, the confirm UI is already showing
-      // Just cleanup timers and let user decide
-      // Don't auto-apply anything
+      console.log('[TIMER] [EVENT] Processing input-detection-complete event');
+      stopDetection('backend-timeout');
+
+      // Only reach here if no inputs were detected at all
+      console.log('[TIMER] [EVENT] No inputs detected, showing timeout message');
+      statusEl.textContent = 'No input detected - timed out';
+      document.getElementById('binding-modal-countdown').textContent = '';
+
+      // Store the binding ID to check it hasn't changed
+      const timeoutBindingId = currentBindingId;
+      setTimeout(() =>
+      {
+        // Only close if we're still on the same binding session
+        if (currentBindingId === timeoutBindingId && bindingMode)
+        {
+          console.log('[TIMER] [EVENT] Closing modal after 2s timeout, binding ID match');
+          closeBindingModal();
+        }
+        else
+        {
+          console.log('[TIMER] [EVENT] NOT closing modal - binding ID changed or modal already closed');
+        }
+      }, 2000);
     });
 
     // Store unlisten function for cleanup
@@ -2264,7 +2549,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
       countdownInterval = null;
     }
     console.error('Error waiting for input:', error);
-    alert(`Error: ${error}`);
+    await showAlert(`Error waiting for input: ${error}`, 'Error');
     closeBindingModal();
   }
 }
@@ -2295,90 +2580,19 @@ async function clearBinding()
   } catch (error)
   {
     console.error('Error clearing binding:', error);
-    alert(`Error: ${error}`);
+    await showAlert(`Error clearing binding: ${error}`, 'Error');
   }
 }
 
 function closeBindingModal()
 {
   console.log('[TIMER] closeBindingModal called');
-  // Mark detection as inactive to ignore any pending events
-  isDetectionActive = false;
-
-  // Clear the countdown interval if it's running
-  if (countdownInterval)
-  {
-    console.log('[TIMER] Clearing countdownInterval in closeBindingModal, ID:', countdownInterval);
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  else
-  {
-    console.log('[TIMER] No countdownInterval to clear in closeBindingModal');
-  }
-
-  // Clear keyboard completion timeout
-  if (keyboardCompletionTimeout)
-  {
-    console.log('[TIMER] Clearing keyboardCompletionTimeout in closeBindingModal');
-    clearTimeout(keyboardCompletionTimeout);
-    keyboardCompletionTimeout = null;
-  }
-  else
-  {
-    console.log('[TIMER] No keyboardCompletionTimeout to clear in closeBindingModal');
-  }
-
-  // Cleanup keyboard detection
-  if (keyboardDetectionHandler)
-  {
-    document.removeEventListener('keydown', keyboardDetectionHandler, true);
-    keyboardDetectionHandler = null;
-  }
-  keyboardDetectionActive = false;
-
-  // Cleanup mouse detection
-  if (window.mouseDetectionHandler)
-  {
-    document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
-    document.removeEventListener('mouseup', window.mouseUpHandler, true);
-    document.removeEventListener('contextmenu', window.contextMenuHandler, true);
-    window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-    window.mouseDetectionHandler = null;
-    window.contextMenuHandler = null;
-    window.mouseUpHandler = null;
-    window.beforeUnloadHandler = null;
-  }
-  if (window.mouseDetectionActive !== undefined)
-  {
-    window.mouseDetectionActive = false;
-  }
-
-  // Cleanup event listeners
-  if (window.currentInputDetectionUnlisten)
-  {
-    console.log('[TIMER] Calling currentInputDetectionUnlisten');
-    window.currentInputDetectionUnlisten();
-    window.currentInputDetectionUnlisten = null;
-  }
-  else
-  {
-    console.log('[TIMER] No currentInputDetectionUnlisten to call');
-  }
-  if (window.currentCompletionUnlisten)
-  {
-    console.log('[TIMER] Calling currentCompletionUnlisten');
-    window.currentCompletionUnlisten();
-    window.currentCompletionUnlisten = null;
-  }
-  else
-  {
-    console.log('[TIMER] No currentCompletionUnlisten to call');
-  }
+  stopDetection('modal-close');
 
   bindingMode = false;
   currentBindingAction = null;
   document.getElementById('binding-modal').style.display = 'none';
+  setBindingSaveEnabled(false);
 }
 
 async function refreshBindings()
@@ -2407,6 +2621,174 @@ async function refreshBindings()
 // Make startBinding available globally
 window.startBinding = startBinding;
 
+// Global function to clear all bindings for an action (called from action-level Clear button)
+window.clearActionBinding = async function (actionMapName, actionName)
+{
+  console.log('clearActionBinding called with:', { actionMapName, actionName });
+
+  // Show custom confirmation dialog
+  const confirmed = await showConfirmation(
+    'Clear all bindings for this action?',
+    'Clear Action Bindings',
+    'Clear',
+    'Cancel'
+  );
+
+  if (!confirmed)
+  {
+    console.log('User cancelled action clearing');
+    return;
+  }
+
+  try
+  {
+    // Find the action to see what default bindings it has
+    const action = currentKeybindings.action_maps
+      .find(am => am.name === actionMapName)
+      ?.actions.find(a => a.name === actionName);
+
+    if (!action)
+    {
+      console.error('Action not found');
+      return;
+    }
+
+    // Get all the current bindings (including defaults) to determine which input types to clear
+    const inputTypesToClear = new Set();
+    if (action.bindings)
+    {
+      action.bindings.forEach(binding =>
+      {
+        if (binding.input && binding.input.trim())
+        {
+          // Determine input type from the binding
+          if (binding.input.startsWith('js'))
+          {
+            inputTypesToClear.add('joystick');
+          }
+          else if (binding.input.startsWith('kb'))
+          {
+            inputTypesToClear.add('keyboard');
+          }
+          else if (binding.input.startsWith('mouse'))
+          {
+            inputTypesToClear.add('mouse');
+          }
+          else if (binding.input.startsWith('gp'))
+          {
+            inputTypesToClear.add('gamepad');
+          }
+        }
+      });
+    }
+
+    console.log('Input types to clear:', Array.from(inputTypesToClear));
+
+    // Clear each input type by providing the appropriate cleared binding format
+    for (const inputType of inputTypesToClear)
+    {
+      let clearedInput = '';
+      switch (inputType)
+      {
+        case 'joystick':
+          clearedInput = 'js1_ '; // Cleared joystick binding
+          break;
+        case 'keyboard':
+          clearedInput = 'kb1_ '; // Cleared keyboard binding
+          break;
+        case 'mouse':
+          clearedInput = 'mouse1_ '; // Cleared mouse binding
+          break;
+        case 'gamepad':
+          clearedInput = 'gp1_ '; // Cleared gamepad binding
+          break;
+      }
+
+      if (clearedInput)
+      {
+        console.log(`Clearing ${inputType} with: "${clearedInput}"`);
+        await invoke('update_binding', {
+          actionMapName: actionMapName,
+          actionName: actionName,
+          newInput: clearedInput
+        });
+      }
+    }
+
+    // Mark as unsaved
+    hasUnsavedChanges = true;
+    updateUnsavedIndicator();
+
+    await refreshBindings();
+  } catch (error)
+  {
+    console.error('Error clearing action binding:', error);
+    await showAlert(`Error clearing action binding: ${error}`, 'Error');
+  }
+};
+
+// Global function to reset an action to default bindings (called from action-level Reset button)
+window.resetActionBinding = async function (actionMapName, actionName)
+{
+  console.log('resetActionBinding called with:', { actionMapName, actionName });
+
+  // Show custom confirmation dialog
+  const confirmed = await showConfirmation(
+    'Reset this action to default bindings?',
+    'Reset to Default',
+    'Reset',
+    'Cancel'
+  );
+
+  if (!confirmed)
+  {
+    console.log('User cancelled action reset');
+    return;
+  }
+
+  try
+  {
+    // Call backend to reset binding (remove customization)
+    await invoke('reset_binding', {
+      actionMapName: actionMapName,
+      actionName: actionName
+    });
+
+    // Mark as unsaved
+    hasUnsavedChanges = true;
+    updateUnsavedIndicator();
+
+    // Refresh to show default bindings
+    await refreshBindings();
+  } catch (error)
+  {
+    console.error('Error resetting action binding:', error);
+    // Fallback to old method if reset_binding doesn't exist
+    if (error.toString().includes('not found'))
+    {
+      console.log('Using fallback reset method');
+      try
+      {
+        await invoke('update_binding', {
+          actionMapName: actionMapName,
+          actionName: actionName,
+          newInput: ''
+        });
+        hasUnsavedChanges = true;
+        updateUnsavedIndicator();
+        await refreshBindings();
+      } catch (fallbackError)
+      {
+        console.error('Error in fallback reset:', fallbackError);
+        await showAlert(`Error resetting binding: ${fallbackError}`, 'Error');
+      }
+    } else
+    {
+      await showAlert(`Error resetting binding: ${error}`, 'Error');
+    }
+  }
+};
+
 // Function to remove a specific binding
 window.removeBinding = async function (actionMapName, actionName, inputToClear)
 {
@@ -2424,7 +2806,7 @@ window.removeBinding = async function (actionMapName, actionName, inputToClear)
   if (!confirmed)
   {
     console.log('User cancelled binding removal');
-    return;
+    return false;
   }
 
   console.log('User confirmed, proceeding with removal');
@@ -2446,10 +2828,12 @@ window.removeBinding = async function (actionMapName, actionName, inputToClear)
     // Refresh bindings
     await refreshBindings();
 
+    return true;
   } catch (error)
   {
     console.error('Error removing binding:', error);
-    alert(`Error: ${error}`);
+    await showAlert(`Error removing binding: ${error}`, 'Error');
+    return false;
   }
 };
 
@@ -2489,7 +2873,8 @@ let detectedJoysticks = [];
 
 let currentDetectingDevice = null; // 'js1', 'js2', or 'gp1'
 let deviceDetectionSessionId = null;
-let deviceMappings = {}; // Stores { js1: { detectedNum: 3, detectedPrefix: 'js', deviceName: 'VKB' }, ... }
+let deviceMappings = {}; // Stores { js1: { detectedNum: 3, detectedPrefix: 'js', deviceName: 'VKB', deviceUuid: 'uuid-string' }, ... }
+let deviceUuidMapping = {}; // Stores UUID-based mappings: { 'uuid-string': 'js1', ... }
 
 async function openJoystickMappingModal()
 {
@@ -2528,6 +2913,34 @@ function loadDeviceMappings()
       deviceMappings = {};
     }
   }
+
+  // Load UUID-based mappings
+  const savedUuidMapping = localStorage.getItem('joystickUuidMapping');
+  if (savedUuidMapping)
+  {
+    try
+    {
+      deviceUuidMapping = JSON.parse(savedUuidMapping);
+      console.log('Loaded UUID-based device mappings:', deviceUuidMapping);
+
+      // Try to auto-restore mappings based on UUID
+      tryAutoRestoreMappings();
+    }
+    catch (e)
+    {
+      console.error('Failed to parse saved UUID mapping:', e);
+      deviceUuidMapping = {};
+    }
+  }
+}
+
+// Attempt to automatically restore device mappings based on connected devices' UUIDs
+async function tryAutoRestoreMappings()
+{
+  // This will be called when opening the mapping modal
+  // We'll check if any currently connected devices match saved UUIDs
+  // For now, just log that this feature is ready
+  console.log('[UUID-MAPPING] Auto-restore ready, will attempt when devices detected');
 }
 
 async function detectDevice(targetDevice)
@@ -2596,15 +3009,26 @@ async function detectDevice(targetDevice)
         const prefix = match[1];
         const detectedNum = parseInt(match[2]);
 
-        // Get device name from result
+        // Get device name and UUID from result
         const deviceName = result.display_name || `Device ${detectedNum}`;
+        const deviceUuid = result.device_uuid || null;
+
+        console.log(`[UUID-MAPPING] Device detected - UUID: ${deviceUuid}, Name: ${deviceName}`);
 
         // Store the mapping
         deviceMappings[targetDevice] = {
           detectedNum: detectedNum,
           detectedPrefix: prefix,
-          deviceName: deviceName
+          deviceName: deviceName,
+          deviceUuid: deviceUuid
         };
+
+        // If we have a UUID, also store the reverse mapping (UUID -> target device)
+        if (deviceUuid)
+        {
+          deviceUuidMapping[deviceUuid] = targetDevice;
+          console.log(`[UUID-MAPPING] Saved UUID mapping: ${deviceUuid} -> ${targetDevice}`);
+        }
 
         console.log(`[DEVICE-DETECTION] Mapped ${targetDevice}: ${prefix}${detectedNum}`);
 
@@ -2638,8 +3062,8 @@ async function detectDevice(targetDevice)
   }
   catch (error)
   {
-    console.error('[DEVICE-DETECTION] Error:', error);
-    if (infoDiv)
+    console.error('Error loading keybindings:', error);
+    await showAlert(`Error loading keybindings: ${error}`, 'Error');
     {
       infoDiv.classList.remove('detecting');
       infoDiv.innerHTML = `<div style="color: #d9534f;">❌ Error: ${error.message || error}</div>`;
@@ -2692,6 +3116,27 @@ function stopDeviceDetection()
   deviceDetectionSessionId = null;
 }
 
+function resetDeviceMapping(device)
+{
+  console.log(`[DEVICE-MAPPING] Resetting mapping for ${device}`);
+
+  // Remove from deviceMappings
+  if (deviceMappings[device])
+  {
+    delete deviceMappings[device];
+  }
+
+  // Remove from deviceUuidMapping if it exists
+  const uuidToRemove = Object.keys(deviceUuidMapping).find(uuid => deviceUuidMapping[uuid] === device);
+  if (uuidToRemove)
+  {
+    delete deviceUuidMapping[uuidToRemove];
+  }
+
+  // Update display
+  updateDeviceInfoDisplays();
+}
+
 function updateDeviceInfoDisplays()
 {
   // Update all device info displays
@@ -2723,7 +3168,12 @@ function saveJoystickMapping()
 {
   // Save the device mappings
   localStorage.setItem('joystickMapping', JSON.stringify(deviceMappings));
+
+  // Save UUID-based mappings for persistent device recognition
+  localStorage.setItem('joystickUuidMapping', JSON.stringify(deviceUuidMapping));
+
   console.log('Saved joystick mapping:', deviceMappings);
+  console.log('Saved UUID mapping:', deviceUuidMapping);
 
   closeJoystickMappingModal();
 }
@@ -2798,7 +3248,7 @@ async function startJoystickTest(detectedScNum, devicePrefix)
     if (result && result.input_string.startsWith(`${devicePrefix}${detectedScNum}_`))
     {
       // Detected input from this device!
-      indicator.textContent = `✅ Detected: ${result.display_name}`;
+      renderDetectedInputMessage(indicator, `✅ Detected: ${result.display_name}`);
       indicator.classList.add('detected');
 
       // Reset after 2 seconds
@@ -2928,6 +3378,48 @@ function formatDisplayName(name)
     .join(' ');
 }
 
+// Helper function to show conflicts in the binding modal
+function displayConflictsInModal(conflicts)
+{
+  const conflictDisplay = document.getElementById('binding-conflict-display');
+
+  if (!conflicts || conflicts.length === 0)
+  {
+    conflictDisplay.style.display = 'none';
+    conflictDisplay.innerHTML = '';
+    return;
+  }
+
+  const conflictItems = conflicts.map(c =>
+  {
+    const actionLabel = (c.action_label && !c.action_label.startsWith('@'))
+      ? c.action_label
+      : formatDisplayName(c.action_name);
+
+    const mapLabel = (c.action_map_label && !c.action_map_label.startsWith('@'))
+      ? c.action_map_label
+      : formatDisplayName(c.action_map_name);
+
+    return `
+      <div class="conflict-item-inline">
+        <div class="conflict-action-label">${actionLabel}</div>
+        <div class="conflict-map-label">${mapLabel}</div>
+      </div>
+    `;
+  }).join('');
+
+  conflictDisplay.innerHTML = `
+    <div class="conflict-warning-header">
+      <span class="conflict-icon">⚠️</span>
+      <span>This input is already used by ${conflicts.length} action${conflicts.length > 1 ? 's' : ''}:</span>
+    </div>
+    <div class="conflict-list-inline">
+      ${conflictItems}
+    </div>
+  `;
+  conflictDisplay.style.display = 'block';
+}
+
 function closeConflictModal()
 {
   const modal = document.getElementById('conflict-modal');
@@ -2935,6 +3427,7 @@ function closeConflictModal()
 
   // Clear pending binding
   window.pendingBinding = null;
+  setBindingSaveEnabled(false);
 
   // Update binding modal status
   document.getElementById('binding-modal-status').textContent = 'Binding cancelled';
@@ -2952,20 +3445,28 @@ async function confirmConflictBinding()
 
   if (window.pendingBinding)
   {
-    const { actionMapName, actionName, mappedInput } = window.pendingBinding;
-    await applyBinding(actionMapName, actionName, mappedInput);
+    const { actionMapName, actionName, mappedInput, multiTap } = window.pendingBinding;
+
+    // Get the selected activation mode
+    const activationModeSelect = document.getElementById('activation-mode-select');
+    const activationMode = activationModeSelect ? activationModeSelect.value : null;
+
+    await applyBinding(actionMapName, actionName, mappedInput, multiTap, activationMode);
     window.pendingBinding = null;
+    setBindingSaveEnabled(false);
   }
 }
 
-async function applyBinding(actionMapName, actionName, mappedInput)
+async function applyBinding(actionMapName, actionName, mappedInput, multiTap = null, activationMode = null)
 {
   console.log('Calling update_binding...');
   // Update the binding in backend
   await invoke('update_binding', {
     actionMapName: actionMapName,
     actionName: actionName,
-    newInput: mappedInput
+    newInput: mappedInput,
+    multiTap: multiTap,
+    activationMode: activationMode
   });
   console.log('update_binding completed');
 
@@ -3018,7 +3519,7 @@ async function resetBinding()
       await fallbackResetBinding();
     } else
     {
-      alert(`Error: ${error}`);
+      await showAlert(`Error resetting binding: ${error}`, 'Error');
     }
   }
 }
@@ -3047,7 +3548,7 @@ async function fallbackResetBinding()
   } catch (error)
   {
     console.error('Error in fallback reset:', error);
-    alert(`Error: ${error}`);
+    await showAlert(`Error resetting binding: ${error}`, 'Error');
   }
 }
 
@@ -3104,7 +3605,7 @@ async function fallbackResetBinding()
         } catch (e)
         {
           console.error('Failed to copy to clipboard:', e);
-          alert(`Log file path:\n${logPath}`);
+          await showAlert(`Log file path:\n${logPath}`, 'Log File Path');
         }
       });
 
@@ -3115,3 +3616,302 @@ async function fallbackResetBinding()
     console.error('Failed to get log file path:', error);
   }
 })();
+
+// =====================
+// FONT SIZE SCALING (Ctrl +/- / Cmd +/-)
+// =====================
+
+const FONT_SIZE_MIN = 10; // pixels
+const FONT_SIZE_MAX = 24; // pixels
+const FONT_SIZE_DEFAULT = 14; // pixels
+const FONT_SIZE_STEP = 1; // pixels per increment
+
+function initializeFontSizeScaling()
+{
+  // Load saved font size or use default
+  const savedFontSize = localStorage.getItem('appFontSize');
+  if (savedFontSize)
+  {
+    setFontSize(parseInt(savedFontSize));
+  } else
+  {
+    setFontSize(FONT_SIZE_DEFAULT);
+  }
+
+  // Add keyboard listener for font size controls
+  document.addEventListener('keydown', (e) =>
+  {
+    // Check for Ctrl (Windows/Linux) or Cmd (Mac)
+    const isModifierPressed = e.ctrlKey || e.metaKey;
+
+    if (isModifierPressed && !e.altKey && !e.shiftKey)
+    {
+      if (e.key === '+' || e.key === '=')
+      {
+        e.preventDefault();
+        increaseFontSize();
+      } else if (e.key === '-' || e.key === '_')
+      {
+        e.preventDefault();
+        decreaseFontSize();
+      } else if (e.key === '0')
+      {
+        e.preventDefault();
+        resetFontSize();
+      }
+    }
+  });
+}
+
+function setFontSize(size)
+{
+  // Clamp size between min and max
+  size = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size));
+
+  // Apply to root element
+  document.documentElement.style.fontSize = `${size}px`;
+
+  // Save to localStorage
+  localStorage.setItem('appFontSize', size);
+
+  console.log(`Font size set to ${size}px`);
+}
+
+function increaseFontSize()
+{
+  const current = parseInt(localStorage.getItem('appFontSize') || FONT_SIZE_DEFAULT);
+  setFontSize(current + FONT_SIZE_STEP);
+}
+
+function decreaseFontSize()
+{
+  const current = parseInt(localStorage.getItem('appFontSize') || FONT_SIZE_DEFAULT);
+  setFontSize(current - FONT_SIZE_STEP);
+}
+
+function resetFontSize()
+{
+  setFontSize(FONT_SIZE_DEFAULT);
+}
+
+// Make font size controls globally available
+window.increaseFontSize = increaseFontSize;
+window.decreaseFontSize = decreaseFontSize;
+window.resetFontSize = resetFontSize;
+
+// =====================
+// ACTION BINDINGS MANAGER MODAL
+// =====================
+
+let currentActionBindingsData = null;
+
+async function openActionBindingsModal(actionMapName, actionName, actionDisplayName)
+{
+  currentActionBindingsData = {
+    actionMapName,
+    actionName,
+    actionDisplayName
+  };
+
+  // Get the action data
+  const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+  if (!actionMap) return;
+
+  const action = actionMap.actions.find(a => a.name === actionName);
+  if (!action) return;
+
+  // Show modal
+  const modal = document.getElementById('action-bindings-modal');
+  const title = document.getElementById('action-bindings-title');
+  const listContainer = document.getElementById('action-bindings-list');
+
+  title.textContent = `Manage Bindings: ${actionDisplayName}`;
+
+  // Render bindings list
+  let html = '';
+
+  if (!action.bindings || action.bindings.length === 0)
+  {
+    html = '<div class="empty-state" style="padding: 2rem; text-align: center; color: var(--text-secondary);">No bindings yet. Click "Add New Binding" to create one.</div>';
+  }
+  else
+  {
+    action.bindings.forEach((binding, index) =>
+    {
+      const trimmedInput = binding.input.trim();
+
+      // Skip truly empty bindings
+      if (!trimmedInput || trimmedInput === '') return;
+
+      // Skip cleared override placeholders
+      if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return;
+
+      let icon = '○';
+      if (binding.input_type === 'Keyboard') icon = '⌨️';
+      else if (binding.input_type === 'Mouse') icon = '🖱️';
+      else if (binding.input_type === 'Joystick') icon = '🕹️';
+      else if (binding.input_type === 'Gamepad') icon = '🎮';
+
+      const defaultBadge = binding.is_default ? '<span class="action-binding-default-badge">Default</span>' : '';
+      const customBadge = !binding.is_default ? '<span class="action-binding-custom-badge">Custom</span>' : '';
+      const activationValue = binding.activation_mode || '';
+
+      html += `
+        <div class="action-binding-item ${binding.is_default ? 'is-default' : ''}" data-binding-index="${index}">
+          <div class="action-binding-icon">${icon}</div>
+          <div class="action-binding-device">
+            ${binding.input_type}${defaultBadge}${customBadge}
+          </div>
+          <div class="action-binding-input">${binding.display_name}</div>
+          <div class="action-binding-activation">
+            <select class="binding-activation-select" data-binding-index="${index}">
+              <option value="">Default (Press)</option>
+              <option value="press" ${activationValue === 'press' ? 'selected' : ''}>Press</option>
+              <option value="press_quicker" ${activationValue === 'press_quicker' ? 'selected' : ''}>Press (Quicker)</option>
+              <option value="delayed_press" ${activationValue === 'delayed_press' ? 'selected' : ''}>Delayed Press</option>
+              <option value="delayed_press_medium" ${activationValue === 'delayed_press_medium' ? 'selected' : ''}>Delayed Press (Medium)</option>
+              <option value="delayed_press_long" ${activationValue === 'delayed_press_long' ? 'selected' : ''}>Delayed Press (Long)</option>
+              <option value="tap" ${activationValue === 'tap' ? 'selected' : ''}>Tap</option>
+              <option value="tap_quicker" ${activationValue === 'tap_quicker' ? 'selected' : ''}>Tap (Quicker)</option>
+              <option value="double_tap" ${activationValue === 'double_tap' ? 'selected' : ''}>Double Tap</option>
+              <option value="double_tap_nonblocking" ${activationValue === 'double_tap_nonblocking' ? 'selected' : ''}>Double Tap (Non-blocking)</option>
+              <option value="hold" ${activationValue === 'hold' ? 'selected' : ''}>Hold</option>
+              <option value="delayed_hold" ${activationValue === 'delayed_hold' ? 'selected' : ''}>Delayed Hold</option>
+              <option value="delayed_hold_long" ${activationValue === 'delayed_hold_long' ? 'selected' : ''}>Delayed Hold (Long)</option>
+              <option value="hold_no_retrigger" ${activationValue === 'hold_no_retrigger' ? 'selected' : ''}>Hold (No Retrigger)</option>
+              <option value="hold_toggle" ${activationValue === 'hold_toggle' ? 'selected' : ''}>Hold Toggle</option>
+              <option value="smart_toggle" ${activationValue === 'smart_toggle' ? 'selected' : ''}>Smart Toggle</option>
+              <option value="all" ${activationValue === 'all' ? 'selected' : ''}>All</option>
+            </select>
+          </div>
+          <div class="action-binding-remove">
+            <button onclick="removeBindingFromModal(${index})">×</button>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  listContainer.innerHTML = html;
+  modal.style.display = 'flex';
+
+  // Setup event listeners for modal buttons
+  document.getElementById('action-bindings-cancel-btn').onclick = closeActionBindingsModal;
+  document.getElementById('action-bindings-save-btn').onclick = saveActionBindingsChanges;
+  document.getElementById('action-bindings-add-btn').onclick = addNewBindingFromModal;
+}
+
+function closeActionBindingsModal()
+{
+  document.getElementById('action-bindings-modal').style.display = 'none';
+  currentActionBindingsData = null;
+}
+
+async function saveActionBindingsChanges()
+{
+  if (!currentActionBindingsData) return;
+
+  const { actionMapName, actionName } = currentActionBindingsData;
+
+  // Get all activation mode selects
+  const selects = document.querySelectorAll('.binding-activation-select');
+
+  // Get the action data
+  const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+  if (!actionMap) return;
+
+  const action = actionMap.actions.find(a => a.name === actionName);
+  if (!action) return;
+
+  // Update each binding's activation mode
+  const updatePromises = [];
+
+  selects.forEach(select =>
+  {
+    const index = parseInt(select.dataset.bindingIndex);
+    const newActivationMode = select.value || null;
+    const binding = action.bindings[index];
+    const currentActivationMode = binding.activation_mode || null;
+
+    if (binding && currentActivationMode !== newActivationMode)
+    {
+      console.log(`Updating activation mode for binding ${index}: ${currentActivationMode} -> ${newActivationMode}`);
+
+      // If this is a default binding, we're creating a custom binding with the same input
+      if (binding.is_default)
+      {
+        console.log(`Creating custom binding from default: ${binding.input} with activation mode: ${newActivationMode}`);
+      }
+
+      // Update via backend
+      const promise = invoke('update_binding', {
+        actionMapName,
+        actionName,
+        newInput: binding.input,
+        multiTap: binding.multi_tap,
+        activationMode: newActivationMode
+      }).catch(err =>
+      {
+        console.error('Failed to update binding:', err);
+      });
+
+      updatePromises.push(promise);
+    }
+  });
+
+  if (updatePromises.length > 0)
+  {
+    // Wait for all updates to complete
+    await Promise.all(updatePromises);
+
+    // Mark as unsaved
+    hasUnsavedChanges = true;
+    updateUnsavedIndicator();
+
+    // Refresh bindings
+    await refreshBindings();
+  }
+
+  closeActionBindingsModal();
+}
+
+async function removeBindingFromModal(index)
+{
+  if (!currentActionBindingsData) return;
+
+  const { actionMapName, actionName, actionDisplayName } = currentActionBindingsData;
+
+  // Get the action data
+  const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+  if (!actionMap) return;
+
+  const action = actionMap.actions.find(a => a.name === actionName);
+  if (!action || !action.bindings[index]) return;
+
+  const binding = action.bindings[index];
+  if (!binding || !binding.input) return;
+
+  const removalSucceeded = await window.removeBinding(actionMapName, actionName, binding.input);
+  if (!removalSucceeded) return;
+
+  const modal = document.getElementById('action-bindings-modal');
+  if (modal && modal.style.display !== 'none')
+  {
+    openActionBindingsModal(actionMapName, actionName, actionDisplayName || action.display_name || action.name);
+  }
+}
+
+function addNewBindingFromModal()
+{
+  if (!currentActionBindingsData) return;
+
+  const { actionMapName, actionName, actionDisplayName } = currentActionBindingsData;
+
+  // Close this modal and open the binding detection modal
+  closeActionBindingsModal();
+  startBinding(actionMapName, actionName, actionDisplayName);
+}
+
+// Make it globally available
+window.openActionBindingsModal = openActionBindingsModal;
+window.removeBindingFromModal = removeBindingFromModal;

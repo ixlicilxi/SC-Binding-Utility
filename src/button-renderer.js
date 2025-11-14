@@ -396,9 +396,37 @@ export function buildButtonLabelContent(button)
     {
         contentLines.push(`[subtle]Button ${displayButtonId}`);
     }
+    else if (button.inputs && button.inputs.main)
+    {
+        // Try to match axis in numeric format: js1_axis3 or js1_axis3_positive
+        const axisMatch = button.inputs.main.match(/axis(\d+)(?:_(positive|negative))?/i);
+        if (axisMatch)
+        {
+            const dirSymbol = axisMatch[2] === 'positive' ? '+' : axisMatch[2] === 'negative' ? '-' : '';
+            const suffix = dirSymbol ? ` ${dirSymbol}` : '';
+            contentLines.push(`[subtle]Axis ${axisMatch[1]}${suffix}`);
+        }
+        else
+        {
+            // Try to match Star Citizen axis format: js1_x, js1_y, js1_z, js1_rotx, js1_roty, js1_rotz, js1_slider
+            const scAxisMatch = button.inputs.main.match(/_(x|y|z|rotx|roty|rotz|slider)$/i);
+            if (scAxisMatch)
+            {
+                const axisName = scAxisMatch[1].toUpperCase();
+                contentLines.push(`[subtle]Axis ${axisName}`);
+            }
+        }
+    }
+    else if (button.inputType === 'axis' && button.inputId !== undefined)
+    {
+        const dirSymbol = button.axisDirection === 'positive' ? '+' : (button.axisDirection === 'negative' ? '-' : '');
+        const suffix = dirSymbol ? ` ${dirSymbol}` : '';
+        contentLines.push(`[subtle]Axis ${button.inputId}${suffix}`);
+    }
 
     // Check if button has a binding
-    const hasBound = button.inputs && (button.inputs.main || button.buttonId !== undefined);
+    const hasBound = (button.inputs && button.inputs.main) || button.buttonId !== undefined ||
+        (button.inputType && button.inputId !== undefined);
     if (!hasBound)
     {
         contentLines.push('[muted](unbound)');
@@ -642,7 +670,7 @@ export function drawHat4WayFrames(ctx, button, alpha, handleSize, zoom)
             const match = input.match(/button(\d+)/i);
             if (match)
             {
-                contentLines.push(`[subtle]Btn ${match[1]}`);
+                contentLines.push(`[subtle]Button ${match[1]}`);
             }
             return contentLines;
         },

@@ -108,6 +108,7 @@ pub struct DetectedInput {
     pub modifiers: Vec<String>,  // Active modifiers: LALT, RALT, LCTRL, RCTRL, LSHIFT, RSHIFT
     pub is_modifier: bool,       // True if this input itself is a modifier key
     pub session_id: String,      // Session ID to track which detection session this input belongs to
+    pub device_uuid: Option<String>, // Unique device identifier for persistent mapping
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -278,6 +279,9 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                         }
                     };
                     
+                    // Get device UUID for persistent mapping
+                    let device_uuid = format!("{:?}", gamepad.uuid());
+                    
                     return Ok(Some(DetectedInput {
                         input_string,
                         display_name,
@@ -286,6 +290,7 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                         modifiers: get_active_modifiers(),
                         is_modifier: false,
                         session_id: session_id.clone(),
+                        device_uuid: Some(device_uuid),
                     }));
                 }
                 EventType::AxisChanged(axis, value, code) => {
@@ -354,14 +359,14 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                             state.last_triggered_direction = Some(should_trigger_positive);
                             state.last_value = value;
                             
-                            // Get friendly axis name
-                            let axis_name = match axis {
-                                Axis::LeftStickX => "Left Stick X",
-                                Axis::LeftStickY => "Left Stick Y",
-                                Axis::RightStickX => "Right Stick X",
-                                Axis::RightStickY => "Right Stick Y",
-                                Axis::LeftZ => "Left Z",
-                                Axis::RightZ => "Right Z",
+                            // Get friendly axis name (using Star Citizen naming convention)
+                            let axis_name = match axis_index {
+                                1 => "X",
+                                2 => "Y",
+                                3 => "RotX",
+                                4 => "RotY",
+                                5 => "Z",
+                                6 => "RotZ",
                                 _ => "Axis",
                             };
                             
@@ -373,6 +378,7 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: session_id.clone(),
+                                device_uuid: None,
                             }));
                         }
                     }
@@ -419,6 +425,7 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: session_id.clone(),
+                                device_uuid: None,
                             }));
                         }
                     }
@@ -475,6 +482,7 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: session_id.clone(),
+                                device_uuid: None,
                             }));
                         }
                     }
@@ -619,6 +627,7 @@ pub fn wait_for_multiple_inputs(session_id: String, initial_timeout_secs: u64, c
                         modifiers: get_active_modifiers(),
                         is_modifier: false,
                         session_id: session_id.clone(),
+                        device_uuid: Some(format!("{:?}", gamepad.uuid())),
                     })
                 }
                 EventType::AxisChanged(axis, value, code) => {
@@ -692,6 +701,7 @@ pub fn wait_for_multiple_inputs(session_id: String, initial_timeout_secs: u64, c
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: session_id.clone(),
+                                device_uuid: Some(format!("{:?}", gamepad.uuid())),
                             })
                         } else {
                             None
@@ -790,7 +800,7 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
     
     let start = Instant::now();
     let initial_timeout = Duration::from_secs(initial_timeout_secs);
-    let mut detected_inputs: std::collections::HashSet<String> = std::collections::HashSet::new(); // Track to avoid duplicates
+    // Removed HashSet to allow duplicate inputs for double-tap detection
     let mut first_input_time: Option<Instant> = None;
     let collect_duration = Duration::from_secs(collect_duration_secs);
     
@@ -875,6 +885,7 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
                         modifiers: get_active_modifiers(),
                         is_modifier: false,
                         session_id: session_id.clone(),
+                        device_uuid: Some(format!("{:?}", gamepad.uuid())),
                     })
                 }
                 EventType::AxisChanged(axis, value, code) => {
@@ -951,6 +962,7 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: session_id.clone(),
+                                device_uuid: Some(format!("{:?}", gamepad.uuid())),
                             })
                         } else {
                             None
@@ -963,17 +975,12 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
             };
             
             if let Some(input) = detected_input {
-                // Check if this input is already detected (avoid duplicates)
-                if !detected_inputs.contains(&input.input_string) {
-                    detected_inputs.insert(input.input_string.clone());
-                    
-                    // Emit event immediately
-                    let _ = window.emit("input-detected", &input);
-                    
-                    // Mark the time when first input was detected
-                    if first_input_time.is_none() {
-                        first_input_time = Some(Instant::now());
-                    }
+                // Emit event immediately (allow duplicates for double-tap detection)
+                let _ = window.emit("input-detected", &input);
+                
+                // Mark the time when first input was detected
+                if first_input_time.is_none() {
+                    first_input_time = Some(Instant::now());
                 }
             }
         }
@@ -1007,27 +1014,24 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
                             let sc_instance = controller_id as usize + 1;
                             let input_string = format!("gp{}_button{}", sc_instance, button_num);
                             
-                            // Check if we've already emitted this input in this session
-                            if !detected_inputs.contains(&input_string) {
-                                detected_inputs.insert(input_string.clone());
-                                
-                                let input = DetectedInput {
-                                    input_string,
-                                    display_name: format!("Gamepad {} - Button {}", sc_instance, button_num),
-                                    device_type: "Gamepad".to_string(),
-                                    axis_value: None,
-                                    modifiers: get_active_modifiers(),
-                                    is_modifier: false,
-                                    session_id: session_id.clone(),
-                                };
-                                
-                                // Emit event immediately
-                                let _ = window.emit("input-detected", &input);
-                                
-                                // Mark the time when first input was detected
-                                if first_input_time.is_none() {
-                                    first_input_time = Some(Instant::now());
-                                }
+                            // Emit event immediately (allow duplicates for double-tap detection)
+                            let input = DetectedInput {
+                                input_string,
+                                display_name: format!("Gamepad {} - Button {}", sc_instance, button_num),
+                                device_type: "Gamepad".to_string(),
+                                axis_value: None,
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: session_id.clone(),
+                                device_uuid: None,
+                            };
+                            
+                            // Emit event immediately
+                            let _ = window.emit("input-detected", &input);
+                            
+                            // Mark the time when first input was detected
+                            if first_input_time.is_none() {
+                                first_input_time = Some(Instant::now());
                             }
                         }
                     }
@@ -1078,27 +1082,24 @@ pub fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, in
                             let sc_instance = controller_id as usize + 1;
                             let input_string = format!("gp{}_axis{}_{}", sc_instance, axis_index, direction);
                             
-                            // Check if we've already emitted this input in this session
-                            if !detected_inputs.contains(&input_string) {
-                                detected_inputs.insert(input_string.clone());
-                                
-                                let input = DetectedInput {
-                                    input_string,
-                                    display_name: format!("Gamepad {} - {} {} (Axis {})", sc_instance, axis_name, direction_symbol, axis_index),
-                                    device_type: "Gamepad".to_string(),
-                                    axis_value: Some(*value),
-                                    modifiers: get_active_modifiers(),
-                                    is_modifier: false,
-                                    session_id: session_id.clone(),
-                                };
-                                
-                                // Emit event immediately
-                                let _ = window.emit("input-detected", &input);
-                                
-                                // Mark the time when first input was detected
-                                if first_input_time.is_none() {
-                                    first_input_time = Some(Instant::now());
-                                }
+                            // Emit event immediately (allow duplicates for double-tap detection)
+                            let input = DetectedInput {
+                                input_string,
+                                display_name: format!("Gamepad {} - {} {} (Axis {})", sc_instance, axis_name, direction_symbol, axis_index),
+                                device_type: "Gamepad".to_string(),
+                                axis_value: Some(*value),
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: session_id.clone(),
+                                device_uuid: None,
+                            };
+                            
+                            // Emit event immediately
+                            let _ = window.emit("input-detected", &input);
+                            
+                            // Mark the time when first input was detected
+                            if first_input_time.is_none() {
+                                first_input_time = Some(Instant::now());
                             }
                         }
                     }

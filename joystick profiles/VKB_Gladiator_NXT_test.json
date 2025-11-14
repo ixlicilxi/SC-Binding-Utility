@@ -558,6 +558,24 @@
           "left": "js2_button9",
           "right": "js2_button7"
         }
+      },
+      {
+        "id": 1763091052987,
+        "name": "X Axis",
+        "buttonPos": {
+          "x": 245.83449235048673,
+          "y": 429.12634735744086
+        },
+        "labelPos": {
+          "x": -10,
+          "y": 710
+        },
+        "buttonType": "simple",
+        "inputs": {
+          "main": "js1_axis2_positive"
+        },
+        "inputType": "axis",
+        "inputId": 2
       }
     ]
   }

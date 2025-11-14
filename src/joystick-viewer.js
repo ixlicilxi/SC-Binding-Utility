@@ -17,6 +17,7 @@ import
     drawHat4WayBoxes,
     roundRect
 } from './button-renderer.js';
+import { toStarCitizenFormat } from './input-utils.js';
 
 // ========================================
 // State Management
@@ -68,6 +69,43 @@ function getCurrentJoystickNumber()
 {
     const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
     return (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
+}
+
+function normalizeInputStringForStick(rawInput, jsPrefix)
+{
+    if (!rawInput || typeof rawInput !== 'string')
+    {
+        return null;
+    }
+
+    const trimmed = rawInput.trim();
+    if (!trimmed)
+    {
+        return null;
+    }
+
+    let normalized = trimmed.toLowerCase();
+
+    // Convert to SC axis naming when possible
+    const scFormat = toStarCitizenFormat(normalized);
+    if (scFormat && typeof scFormat === 'string')
+    {
+        normalized = scFormat.toLowerCase();
+    }
+
+    if (jsPrefix)
+    {
+        if (normalized.match(/^(js|gp)\d+_/))
+        {
+            normalized = normalized.replace(/^(js|gp)\d+_/, jsPrefix);
+        }
+        else if (normalized.startsWith('axis') || normalized.startsWith('button'))
+        {
+            normalized = `${jsPrefix}${normalized}`;
+        }
+    }
+
+    return normalized;
 }
 
 // Normalize template data to current format (handles legacy formats)
@@ -135,6 +173,7 @@ window.initializeVisualView = function ()
             if (currentTemplate && window.viewerImage)
             {
                 console.log('Redrawing canvas with updated bindings');
+                centerViewOnImage();
                 resizeViewerCanvas();
                 drawButtons(window.viewerImage);
             }
@@ -251,6 +290,7 @@ window.refreshVisualView = async function ()
         // Redraw canvas if template is loaded
         if (window.viewerImage && currentTemplate)
         {
+            centerViewOnImage();
             resizeViewerCanvas();
         }
     } catch (error)
@@ -292,8 +332,8 @@ async function onTemplateFileSelected(e)
         console.log('window.updateTemplateIndicator exists:', typeof window.updateTemplateIndicator);
         if (window.updateTemplateIndicator)
         {
-            console.log('Calling updateTemplateIndicator with:', templateData.name);
-            window.updateTemplateIndicator(templateData.name);
+            console.log('Calling updateTemplateIndicator with:', templateData.name, file.name);
+            window.updateTemplateIndicator(templateData.name, file.name);
         }
         else
         {
@@ -305,7 +345,7 @@ async function onTemplateFileSelected(e)
     } catch (error)
     {
         console.error('Error loading template:', error);
-        alert(`Failed to load template: ${error}`);
+        await window.showAlert(`Failed to load template: ${error}`, 'Error');
     }
 
     // Clear the input
@@ -388,6 +428,26 @@ function updateHideDefaultsButton()
     }
 }
 
+function centerViewOnImage()
+{
+    if (!window.viewerImage || !canvas) return;
+
+    const container = document.getElementById('viewer-canvas-container');
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const containerCenterX = rect.width / 2;
+    const containerCenterY = rect.height / 2;
+
+    const imageCenterX = window.viewerImage.width / 2;
+    const imageCenterY = window.viewerImage.height / 2;
+
+    pan.x = containerCenterX - (imageCenterX * zoom);
+    pan.y = containerCenterY - (imageCenterY * zoom);
+
+    ViewerState.saveViewState();
+}
+
 function loadPersistedTemplate()
 {
     try
@@ -398,9 +458,10 @@ function loadPersistedTemplate()
             currentTemplate = normalizeTemplateData(savedTemplate);
 
             // Update header template name
+            const savedFileName = localStorage.getItem('templateFileName');
             if (window.updateTemplateIndicator)
             {
-                window.updateTemplateIndicator(currentTemplate.name);
+                window.updateTemplateIndicator(currentTemplate.name, savedFileName);
             }
 
             displayTemplate();
@@ -509,6 +570,8 @@ function displayTemplate()
     {
         // Store image reference for resize handling
         window.viewerImage = img;
+
+        centerViewOnImage();
 
         // Resize canvas to container and draw
         resizeViewerCanvas();
@@ -735,13 +798,20 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
             // Convert bindings to content lines array
             return bindings.map(binding =>
             {
+                // Prepare action label with multi-tap indicator if present
+                let actionLabel = binding.actionLabel || binding.action;
+                if (binding.multiTap && binding.multiTap > 1)
+                {
+                    actionLabel += ` (${binding.multiTap}x)`;
+                }
+
                 // Apply styling based on binding type
                 if (binding.isDefault)
                 {
-                    return `[muted]${binding.actionLabel || binding.action}`;
+                    return `[muted]${actionLabel}`;
                 }
                 // Use [action] prefix for bound actions to apply green color
-                return `[action]${binding.actionLabel || binding.action}`;
+                return `[action]${actionLabel}`;
             });
         },
         colors: {
@@ -779,13 +849,20 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
     // Convert bindings to content lines array for improved rendering
     const contentLines = bindings.map(binding =>
     {
+        // Prepare action label with multi-tap indicator if present
+        let actionLabel = binding.actionLabel || binding.action;
+        if (binding.multiTap && binding.multiTap > 1)
+        {
+            actionLabel += ` (${binding.multiTap}x)`;
+        }
+
         // Apply styling based on binding type
         if (binding.isDefault)
         {
-            return `[muted]${binding.actionLabel || binding.action}`;
+            return `[muted]${actionLabel}`;
         }
         // Use [action] prefix for bound actions to apply green color
-        return `[action]${binding.actionLabel || binding.action}`;
+        return `[action]${actionLabel}`;
     });
 
     // Use improved rendering function from button-renderer.js
@@ -825,7 +902,7 @@ function extractButtonIdentifier(button, direction = null)
 
         if (typeof dirInput === 'string')
         {
-            inputString = dirInput.toLowerCase().replace(/^js[12]_/, jsPrefix);
+            inputString = normalizeInputStringForStick(dirInput, jsPrefix);
         }
         else if (typeof dirInput === 'object' && dirInput.id !== undefined)
         {
@@ -849,34 +926,71 @@ function extractButtonIdentifier(button, direction = null)
         const main = button.inputs.main;
         if (typeof main === 'object' && main.id !== undefined)
         {
-            buttonNum = main.id;
+            if (main.type === 'axis')
+            {
+                const directionSuffix = main.direction ? `_${main.direction}` : '';
+                const axisString = `js${jsNum}_axis${main.id}${directionSuffix}`;
+                inputString = normalizeInputStringForStick(axisString, jsPrefix);
+            }
+            else
+            {
+                buttonNum = main.id;
+            }
         }
         else if (typeof main === 'string')
         {
-            inputString = main.toLowerCase().replace(/^js[12]_/, jsPrefix);
+            inputString = normalizeInputStringForStick(main, jsPrefix);
         }
     }
-    else
+    else if (button.inputType === 'axis' && button.inputId !== undefined && button.inputId !== null)
     {
-        const buttonName = button.name.toLowerCase();
-        let match = buttonName.match(/button\((\d+)\)/);
-        if (match)
+        // inputId might be a number (legacy: 1, 2, 3) or a string (new: "x", "y", "z")
+        if (typeof button.inputId === 'string' && button.inputId.match(/^(x|y|z|rotx|roty|rotz|slider)$/i))
         {
-            buttonNum = parseInt(match[1]);
+            // Already a Star Citizen axis name
+            inputString = normalizeInputStringForStick(`js${jsNum}_${button.inputId.toLowerCase()}`, jsPrefix);
         }
         else
         {
-            match = buttonName.match(/button\s+(\d+)/);
+            // Legacy numeric format
+            const directionSuffix = button.axisDirection ? `_${button.axisDirection}` : '';
+            const axisString = `js${jsNum}_axis${button.inputId}${directionSuffix}`;
+            inputString = normalizeInputStringForStick(axisString, jsPrefix);
+        }
+    }
+    else if (button.inputType === 'button' && button.inputId !== undefined && button.inputId !== null)
+    {
+        buttonNum = button.inputId;
+    }
+    else
+    {
+        // Fallback: Try to parse button number from name
+        // BUT: Only do this if the name actually contains "button"
+        // This prevents "Axis 2" from incorrectly matching "Button 2"
+        const buttonName = button.name.toLowerCase();
+
+        // Only extract button number if "button" is in the name
+        if (buttonName.includes('button'))
+        {
+            let match = buttonName.match(/button\((\d+)\)/);
             if (match)
             {
                 buttonNum = parseInt(match[1]);
             }
             else
             {
-                const allNumbers = buttonName.match(/\d+/g);
-                if (allNumbers && allNumbers.length > 0)
+                match = buttonName.match(/button\s+(\d+)/);
+                if (match)
                 {
-                    buttonNum = parseInt(allNumbers[allNumbers.length - 1]);
+                    buttonNum = parseInt(match[1]);
+                }
+                else
+                {
+                    const allNumbers = buttonName.match(/\d+/g);
+                    if (allNumbers && allNumbers.length > 0)
+                    {
+                        buttonNum = parseInt(allNumbers[allNumbers.length - 1]);
+                    }
                 }
             }
         }
@@ -925,11 +1039,14 @@ function searchBindings(buttonIdentifier)
                     {
                         isMatch = true;
                     }
-                    // Match by button number
+                    // Match by button number - BUT ONLY FOR ACTUAL BUTTONS, NOT AXES
+                    // This prevents "axis2" from incorrectly matching "button2"
                     else if (buttonNum !== null)
                     {
+                        // Only use button number matching if the binding is actually a button
+                        // Check that it doesn't contain 'axis' or 'hat' to avoid false matches
                         const buttonPattern = new RegExp(`^${jsPrefix}button${buttonNum}(?:_|$)`);
-                        if (buttonPattern.test(input))
+                        if (buttonPattern.test(input) && !input.includes('_axis') && !input.includes('_hat'))
                         {
                             isMatch = true;
                         }
@@ -956,7 +1073,8 @@ function searchBindings(buttonIdentifier)
                             input: binding.display_name,
                             actionMap: mapLabel,
                             isDefault: binding.is_default,
-                            modifiers: modifiers
+                            modifiers: modifiers,
+                            multiTap: binding.multi_tap
                         });
                     }
                 }
@@ -1180,9 +1298,16 @@ function onCanvasClick(event)
 
     bindings.forEach(binding =>
     {
+        // Prepare action label with multi-tap indicator if present
+        let actionText = binding.action;
+        if (binding.multiTap && binding.multiTap > 1)
+        {
+            actionText += ` <span class="multi-tap-badge">${binding.multiTap}x tap</span>`;
+        }
+
         html += `
             <div class="binding-info-item">
-                <div class="binding-info-action">${binding.action}</div>
+                <div class="binding-info-action">${actionText}</div>
                 <div class="binding-info-category">${binding.actionMap}</div>
             </div>
         `;
@@ -1285,7 +1410,7 @@ async function exportToImage()
 {
     if (!window.viewerImage || !currentTemplate)
     {
-        alert('Please select a template first');
+        await window.showAlert('Please select a template first', 'Select Template');
         return;
     }
 
@@ -1315,7 +1440,7 @@ async function exportToImage()
 
         if (!isFinite(boundsWidth) || !isFinite(boundsHeight) || boundsWidth <= 0 || boundsHeight <= 0)
         {
-            alert('No bindings to export. Please ensure bindings are visible.');
+            await window.showAlert('No bindings to export. Please ensure bindings are visible.', 'Nothing to Export');
             btn.innerHTML = originalHTML;
             btn.disabled = false;
             return;
@@ -1425,7 +1550,7 @@ async function exportToImage()
             } catch (error)
             {
                 console.error('Error saving file:', error);
-                alert(`Failed to save image: ${error}`);
+                await window.showAlert(`Failed to save image: ${error}`, 'Error');
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
             }
@@ -1434,7 +1559,7 @@ async function exportToImage()
     } catch (error)
     {
         console.error('Error exporting image:', error);
-        alert(`Export failed: ${error}`);
+        await window.showAlert(`Export failed: ${error}`, 'Error');
         const btn = document.getElementById('export-image-btn');
         btn.innerHTML = '<span class="control-icon">💾</span><span>Export</span>';
         btn.disabled = false;

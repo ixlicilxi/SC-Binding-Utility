@@ -9,6 +9,21 @@
   <link rel="stylesheet" href="input-debugger.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Star Citizen Bindnig Utility</title>
+  <script>
+    // Restore font size immediately before page renders to avoid flash
+    (function ()
+    {
+      const FONT_SIZE_DEFAULT = 14;
+      const savedFontSize = localStorage.getItem('appFontSize');
+      if (savedFontSize)
+      {
+        document.documentElement.style.fontSize = savedFontSize + 'px';
+      } else
+      {
+        document.documentElement.style.fontSize = FONT_SIZE_DEFAULT + 'px';
+      }
+    })();
+  </script>
   <script type="module" src="/button-renderer.js" defer></script>
   <script type="module" src="/main.js" defer></script>
   <script type="module" src="/joystick-viewer.js" defer></script>
@@ -23,7 +38,7 @@
       <!-- Header Row 1 -->
       <div class="header-row-1">
         <div class="header-logo">
-          <h1>Star Citizen Binding Utility <span id="app-version">v0.5.1</span></h1>
+          <h1>Star Citizen Binding Utility <span id="app-version">v0.6.0</span></h1>
           <div id="update-info" class="header-update-info"></div>
         </div>
         <div class="header-actions">
@@ -44,11 +59,17 @@
       <!-- Header Row 2 -->
       <div class="header-row-2">
         <div class="header-tabs">
-          <button id="tab-main" class="tab-btn active" data-tab="main">Keybindings</button>
+          <button id="tab-welcome" class="tab-btn active" data-tab="welcome">👋 Welcome</button>
+          <button id="tab-main" class="tab-btn" data-tab="main">Keybindings</button>
           <button id="tab-visual" class="tab-btn" data-tab="visual">Visual View</button>
           <button id="tab-template" class="tab-btn" data-tab="template">Template Editor</button>
           <button id="tab-debugger" class="tab-btn" data-tab="debugger">Input Debugger</button>
           <button id="tab-help" class="tab-btn" data-tab="help">❓ Help</button>
+          <button id="tab-settings" class="tab-btn tab-settings-btn" data-tab="settings"
+            title="Settings & Debug">⚙️</button>
+          <button id="kofi-header-btn" class="tab-btn tab-kofi-btn" type="button" title="Support on Ko-fi">
+            <img src="./assets/kofi_symbol.png" alt="Ko-fi" class="kofi-header-icon">
+          </button>
         </div>
         <div class="header-template-info">
           <span>Template:</span>
@@ -59,15 +80,96 @@
 
     <!-- Main Content - Tab Container -->
     <div class="tab-content-container">
+      <!-- TAB 0: Welcome Page -->
+      <div id="tab-content-welcome" class="tab-content active">
+        <div class="welcome-page-container">
+          <div class="welcome-hero">
+            <h1>👋 Welcome to Star Citizen Binding Utility!</h1>
+            <p class="welcome-subtitle">Your ultimate companion for managing Star Citizen keybindings outside the game
+            </p>
+          </div>
+
+          <div class="welcome-section">
+            <h2>🎮 What is this utility?</h2>
+            <p>The Star Citizen Binding Utility is a powerful desktop application that lets you view, edit, and manage
+              your Star Citizen joystick, keyboard, and mouse keybindings with ease. No more fumbling through in-game
+              menus or editing XML files by hand!</p>
+          </div>
+
+          <div class="welcome-section">
+            <h2>✨ Key Features</h2>
+            <div class="feature-grid">
+              <div class="feature-card">
+                <div class="feature-icon">⌨️</div>
+                <h3>Full Keybinding Editor</h3>
+                <p>Edit all your controls in one place with an intuitive interface</p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🕹️</div>
+                <h3>Visual Joystick View</h3>
+                <p>See your bindings mapped to a visual representation of your joystick</p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🎨</div>
+                <h3>Template Editor</h3>
+                <p>Create custom joystick templates for your specific hardware</p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <h3>Auto Exporting</h3>
+                <p>Automatically export your keybindings to the game directory (including all installations)</p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🧩</div>
+                <h3>Updates</h3>
+                <p>Automatically checks for updates, and notifies you when a new version is available</p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🔍</div>
+                <h3>Input Debugger</h3>
+                <p>Test and debug your input devices in real-time</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="welcome-section">
+            <h2>🚀 Getting Started</h2>
+            <ol class="welcome-steps">
+              <li><strong>Configure Your Devices:</strong> Click the "⚙️ Set Joystick Remapping" button in the
+                Keybindings
+                tab to remap your physical devices (optional)</li>
+              <li><strong>Load Your Bindings:</strong> Click "Load" to import your existing Star Citizen keybindings
+                file</li>
+              <li><strong>Edit & Save:</strong> Make changes and save them back to your game directory</li>
+              <li><strong>Explore Visual View:</strong> Select a template to see your bindings visualized on your
+                joystick</li>
+            </ol>
+          </div>
+
+          <div class="welcome-section support-section">
+            <h2>❤️ Support This Project</h2>
+            <p>If you find this utility helpful, consider supporting its development:</p>
+            <div class="kofi-container">
+              <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
+              <script
+                type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#f25050', 'C0C51OF2NM'); kofiwidget2.draw();</script>
+            </div>
+            <p class="support-note">Your support helps keep this project free and open-source! 🙏</p>
+          </div>
+        </div>
+      </div>
+
       <!-- TAB 1: Main Keybindings Page -->
-      <div id="tab-content-main" class="tab-content active">
+      <div id="tab-content-main" class="tab-content">
         <div class="main-content">
           <!-- Sidebar - Categories and Filters -->
           <aside class="sidebar">
             <div class="filter-section">
-              <h3>Set Device IDs</h3>
+              <h3>Actions</h3>
+              <button id="new-keybinding-btn" class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem;">📝
+                New Keybinding</button>
               <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Set Joystick
-                Mapping</button>
+                Remapping</button>
             </div>
 
             <div class=" filter-section">
@@ -81,6 +183,10 @@
                 <div class="checkbox-container">
                   <input type="checkbox" id="customized-only-checkbox" />
                   <label for="customized-only-checkbox">Customized Only</label>
+                </div>
+                <div class="checkbox-container">
+                  <input type="checkbox" id="show-defaults-checkbox" checked />
+                  <label for="show-defaults-checkbox">Show Default Bindings</label>
                 </div>
               </div>
             </div>
@@ -113,7 +219,11 @@
             <div id="bindings-content" class="bindings-content" style="display: none;">
               <div class="bindings-header">
                 <h2 id="profile-name">Profile Name</h2>
-                <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
+                <div class="search-container">
+                  <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
+                  <button id="search-clear-btn" class="search-clear-btn" title="Clear search"
+                    style="display: none;">✕</button>
+                </div>
               </div>
 
               <div id="action-maps-container" class="action-maps-container">
@@ -435,6 +545,34 @@
 
         <div class="help-page-container">
           <div class="help-section">
+            <h3>⌨️ Keyboard Shortcuts</h3>
+            <p>The app supports the following keyboard shortcuts for quick navigation and adjustments:</p>
+            <table class="shortcuts-table" style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid var(--bg-light);">
+                <th style="text-align: left; padding: 0.5rem; font-weight: 600;">Shortcut</th>
+                <th style="text-align: left; padding: 0.5rem; font-weight: 600;">Action</th>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--bg-light);">
+                <td style="padding: 0.5rem; font-family: 'Courier New', monospace; background: var(--bg-medium);">Ctrl +
+                  Plus (+)</td>
+                <td style="padding: 0.5rem;">Increase font size</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--bg-light);">
+                <td style="padding: 0.5rem; font-family: 'Courier New', monospace; background: var(--bg-medium);">Ctrl +
+                  Minus (−)</td>
+                <td style="padding: 0.5rem;">Decrease font size</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--bg-light);">
+                <td style="padding: 0.5rem; font-family: 'Courier New', monospace; background: var(--bg-medium);">Ctrl +
+                  0</td>
+                <td style="padding: 0.5rem;">Reset font size to default</td>
+              </tr>
+            </table>
+            <p class="help-note" style="margin-top: 1rem;"><strong>💡 Tip:</strong> These shortcuts work on Mac too!
+              Just use Cmd instead of Ctrl. The font size preference is saved automatically.</p>
+          </div>
+
+          <div class="help-section">
             <h3>🎮 Understanding JS1 and JS2</h3>
             <p>Star Citizen uses "js1", "js2", "js3", etc. to identify different joystick/gamepad devices. This
               numbering
@@ -519,6 +657,53 @@
                 settings.</li>
             </ul>
           </div>
+
+          <div class="help-section">
+            <h3>🐛 Report Issues</h3>
+            <p>If you encounter any bugs or issues, please report them on GitHub:</p>
+            <p>
+              <a href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank"
+                rel="noopener noreferrer" class="external-link">
+                https://github.com/BoxximusPrime/SC-Binding-Utility/issues
+              </a>
+            </p>
+            <p class="help-note"><strong>When reporting issues:</strong> Include details about your joystick
+              model, what you were doing when the issue occurred, and any error messages you see. Listing the steps you
+              took to reproduce the issue is also very helpful.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 6: Settings Page -->
+      <div id="tab-content-settings" class="tab-content">
+        <div class="tab-subheader">
+          <h2>⚙️ Settings & Debug</h2>
+        </div>
+
+        <div class="settings-page-container">
+          <div class="settings-section">
+            <h3>🔄 Update Check</h3>
+            <p>The application automatically checks for updates every 4 hours. You can manually check for updates now.
+            </p>
+            <button id="manual-update-check-btn" class="btn btn-primary">🔍 Check for Updates</button>
+            <div id="update-check-status" class="info-text" style="margin-top: 1rem; display: none;"></div>
+          </div>
+
+          <div class="settings-section">
+            <h3>🔧 Application Cache</h3>
+            <p>The application stores data locally to improve performance and remember your preferences. If you're
+              experiencing unexpected issues, you can reset the application cache.</p>
+            <div class="warning-box">
+              <p><strong>⚠️ Warning:</strong> Resetting the application cache will:</p>
+              <ul>
+                <li>Clear all the app's local storage data</li>
+                <li>Clear any unsaved templates, or keybindings (saved files will not be affected)</li>
+                <li>Reset the "What's New" notification</li>
+              </ul>
+              <p><strong>This action cannot be undone!</strong></p>
+            </div>
+            <button id="reset-cache-btn" class="btn btn-danger">🗑️ Reset Application Cache</button>
+          </div>
         </div>
       </div>
     </div>
@@ -526,15 +711,39 @@
 
   <!-- Binding Modal -->
   <div id="binding-modal" class="binding-modal" style="display: none;">
-    <div class="binding-modal-content">
-      <h2>Bind Input</h2>
+    <div class="binding-modal-content" style="padding:1rem;">
       <div class="binding-modal-action" id="binding-modal-action">Action Name</div>
-      <div class="binding-modal-status" id="binding-modal-status">Press any button on your joystick...</div>
+      <div class="binding-modal-status" id="binding-modal-status">Press any button, key, mouse button, or move any
+        axis...</div>
       <div class="binding-modal-countdown" id="binding-modal-countdown">10</div>
+      <div class="binding-modal-controls">
+        <label for="activation-mode-select" class="activation-mode-label">
+          Activation Mode:
+        </label>
+        <select id="activation-mode-select" class="activation-mode-select">
+          <option value="">Default (Press)</option>
+          <option value="press">Press</option>
+          <option value="press_quicker">Press (Quicker)</option>
+          <option value="delayed_press">Delayed Press</option>
+          <option value="delayed_press_medium">Delayed Press (Medium)</option>
+          <option value="delayed_press_long">Delayed Press (Long)</option>
+          <option value="tap">Tap</option>
+          <option value="tap_quicker">Tap (Quicker)</option>
+          <option value="double_tap">Double Tap</option>
+          <option value="double_tap_nonblocking">Double Tap (Non-blocking)</option>
+          <option value="hold">Hold</option>
+          <option value="delayed_hold">Delayed Hold</option>
+          <option value="delayed_hold_long">Delayed Hold (Long)</option>
+          <option value="hold_no_retrigger">Hold (No Retrigger)</option>
+          <option value="hold_toggle">Hold Toggle</option>
+          <option value="smart_toggle">Smart Toggle</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div id="binding-conflict-display" class="binding-conflict-display" style="display: none;"></div>
       <div class="binding-modal-buttons">
+        <button id="binding-modal-save-btn" class="btn btn-success">💾 Save Binding</button>
         <button id="binding-cancel-btn" class="btn btn-secondary">Cancel</button>
-        <button id="binding-reset-btn" class="btn btn-secondary">Reset to Default</button>
-        <button id="binding-clear-btn" class="btn btn-secondary">Clear Binding</button>
       </div>
     </div>
   </div>
@@ -566,11 +775,17 @@
   <div id="joystick-mapping-modal" class="modal" style="display: none;">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>Configure Joystick Mapping</h2>
+        <h2>Joystick Remapping</h2>
       </div>
       <div class="modal-body">
-        <p class="mapping-help">Click "Detect" for each device type, then press any button on the physical device you
-          want to use. The detected device will be automatically mapped.</p>
+        <p class="mapping-help">This feature allows you to override device IDs if they are detected incorrectly. If your
+          joysticks are working with the correct IDs, you can leave this blank. Click "Detect" for each device type you
+          want to remap, then press any button on the physical device.</p>
+        <div
+          style="background: var(--bg-light); border-left: 3px solid #4ec9b0; padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+          <strong>ℹ️ Note:</strong> Device remapping is optional. Leave sections blank if your current device IDs are
+          working correctly.
+        </div>
 
         <div class="stick-mapping-section">
           <div class="stick-section">
@@ -578,7 +793,10 @@
             <div class="stick-info" id="js1-info">
               <div class="not-configured">Not configured</div>
             </div>
-            <button id="detect-js1-btn" class="btn btn-primary">🎮 Detect js1</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="detect-js1-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect js1</button>
+              <button id="reset-js1-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
+            </div>
           </div>
 
           <div class="stick-section">
@@ -586,7 +804,10 @@
             <div class="stick-info" id="js2-info">
               <div class="not-configured">Not configured</div>
             </div>
-            <button id="detect-js2-btn" class="btn btn-primary">🎮 Detect js2</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="detect-js2-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect js2</button>
+              <button id="reset-js2-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
+            </div>
           </div>
 
           <div class="stick-section">
@@ -594,7 +815,10 @@
             <div class="stick-info" id="gp1-info">
               <div class="not-configured">Not configured</div>
             </div>
-            <button id="detect-gp1-btn" class="btn btn-primary">🎮 Detect gp1</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="detect-gp1-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect gp1</button>
+              <button id="reset-gp1-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
+            </div>
           </div>
         </div>
       </div>
@@ -642,9 +866,9 @@
       <!-- Simple button input detection -->
       <div id="simple-input-section">
         <div class="hat-id-box" style="margin-bottom: 0.5rem;">
-          <div class="hat-id-label">Button Number:</div>
+          <div class="hat-id-label">Detected Input:</div>
           <div id="button-id-display" style="font-size: 1.1rem; font-weight: 500; color: var(--text-primary);">—</div>
-          <div class="hat-id-label" style="margin-top: 0.5rem;">Button ID:</div>
+          <div class="hat-id-label" style="margin-top: 0.5rem;">Input ID:</div>
           <code id="button-full-id-display"
             style="font-size: 0.9rem; color: #4ec9b0; background: var(--bg-dark); padding: 0.3rem 0.5rem; border-radius: 3px; display: inline-block;">—</code>
         </div>
@@ -776,6 +1000,25 @@
       </div>
     </div>
   </div>
+
+  <!-- Action Bindings Manager Modal -->
+  <div id="action-bindings-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h2 id="action-bindings-title">Manage Bindings</h2>
+      </div>
+      <div class="modal-body">
+        <div id="action-bindings-list" class="action-bindings-list">
+          <!-- Bindings will be populated here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="action-bindings-add-btn" class="btn btn-primary">+ Add New Binding</button>
+        <button id="action-bindings-save-btn" class="btn btn-success">💾 Save Changes</button>
+        <button id="action-bindings-cancel-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
   </div>
   </div>
 
@@ -784,6 +1027,64 @@
   <input type="file" id="image-file-input" accept="image/*" style="display: none;" />
   <input type="file" id="template-file-input" accept=".json" style="display: none;" />
   <input type="file" id="export-keybindings-input" style="display: none;" />
+
+  <!-- What's New Modal -->
+  <div id="whats-new-modal" class="modal" style="display: none;">
+    <div class="modal-content whats-new-modal-content">
+      <div class="modal-header">
+        <h2>🎉 What's New in v0.6.0</h2>
+      </div>
+      <div class="modal-body whats-new-body">
+        <div class="whats-new-section">
+          <h3>✨ New Features</h3>
+          <ul>
+            <li><strong>Double-Tap Detection:</strong> You can now bind actions to double-tap inputs! Just press a
+              button twice quickly during binding detection.</li>
+            <li><strong>Device Mapping Persistence:</strong> Joystick and gamepad mappings are now saved between
+              sessions for the template editor.</li>
+            <li><strong>Update Checker:</strong> The app now checks for updates and notifies you when a new version is
+              available.</li>
+            <li><strong>Clear Cache:</strong> You can now reset the application cache to clear unsaved data and local
+              storage in case of issues.</li>
+            <li><strong>Button Action Types:</strong> Button types have been added and can be set for each binding.
+              Hold, quick
+              tap, double tap, etc.</li>
+          </ul>
+        </div>
+        <div class="whats-new-section">
+          <h3>🔧 Improvements</h3>
+          <ul>
+            <li><strong>Better Input Detection:</strong> Improved accuracy and reliability when detecting inputs.</li>
+            <li><strong>Improved UI/UX for Keybindings Page: </strong> Now clearer controls, layout, and detection
+              modal.</li>
+            <li><strong>UI Updates For Template Editor:</strong> Now clearer controls, layout, and detection modal.
+            </li>
+            <li><strong>Updated Dual VKB Profile:</strong> added axes (note the profile is a separate download on the
+              github repo).</li>
+            <li><strong>App-Wide Font Size Scaling:</strong> Use Ctrl+Plus to increase, Ctrl+Minus to decrease, and
+              Ctrl+0 to reset font size (like VS Code!).</li>
+            <li><strong>Manage Bindings Button:</strong> Dedicated button to view and manage all bindings for an action
+              without conflicts.</li>
+          </ul>
+        </div>
+        <div class="whats-new-section">
+          <h3>🐛 Bug Fixes</h3>
+          <ul>
+            <li>Visual view axes no longer map to button types.</li>
+          </ul>
+        </div>
+        <div class="whats-new-footer">
+          <p>Thank you for using the SC Binding Utility Beta!</p>
+          <p class="text-muted">Be sure to report any issues on the github <a
+              href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank"
+              rel="noopener noreferrer">repository</a>.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="whats-new-close-btn" class="btn btn-success">Got it!</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Debug Info Footer -->
   <div id="debug-info"

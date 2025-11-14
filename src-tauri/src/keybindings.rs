@@ -73,6 +73,10 @@ pub struct Action {
 #[derive(Debug, Serialize, Clone)]
 pub struct Rebind {
     pub input: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_tap: Option<u32>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub activation_mode: String,
 }
 
 /// Parsed input type for easier filtering
@@ -231,6 +235,8 @@ pub struct BindingInfo {
     pub input: String,
     pub input_type: String,
     pub display_name: String,
+    pub activation_mode: String,
+    pub multi_tap: Option<u32>,
 }
 
 impl ActionMaps {
@@ -345,13 +351,26 @@ impl ActionMaps {
                         },
                         b"rebind" => {
                             let mut input = String::new();
+                            let mut multi_tap: Option<u32> = None;
+                            let mut activation_mode_attr = String::new();
                             for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"input" {
-                                    input = String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                match attr.key.as_ref() {
+                                    b"input" => input = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    b"multiTap" => {
+                                        if let Ok(s) = String::from_utf8(attr.value.to_vec()) {
+                                            multi_tap = s.parse::<u32>().ok();
+                                        }
+                                    },
+                                    b"activationMode" => activation_mode_attr = String::from_utf8(attr.value.to_vec()).unwrap_or_default(),
+                                    _ => {}
                                 }
                             }
                             if let Some(ref mut action) = current_action {
-                                action.rebinds.push(Rebind { input });
+                                action.rebinds.push(Rebind { 
+                                    input, 
+                                    multi_tap,
+                                    activation_mode: activation_mode_attr,
+                                });
                             }
                         },
                         _ => {}
@@ -514,7 +533,12 @@ impl ActionMaps {
                     for rebind in &action.rebinds {
                         xml.push_str("   <rebind input=\"");
                         xml.push_str(&rebind.input);
-                        xml.push_str("\"/>\n");
+                        xml.push_str("\"");
+                        // Add multiTap attribute if present
+                        if let Some(tap_count) = rebind.multi_tap {
+                            xml.push_str(&format!(" multiTap=\"{}\"", tap_count));
+                        }
+                        xml.push_str("/>\n");
                     }
                     
                     xml.push_str("  </action>\n");
@@ -700,7 +724,16 @@ impl ActionMaps {
                         for rebind in &action.rebinds {
                             xml.push_str("   <rebind input=\"");
                             xml.push_str(&rebind.input);
-                            xml.push_str("\"/>\n");
+                            xml.push_str("\"");
+                            // Add multiTap attribute if present
+                            if let Some(tap_count) = rebind.multi_tap {
+                                xml.push_str(&format!(" multiTap=\"{}\"", tap_count));
+                            }
+                            // Add activationMode attribute if present
+                            if !rebind.activation_mode.is_empty() {
+                                xml.push_str(&format!(" activationMode=\"{}\"", rebind.activation_mode));
+                            }
+                            xml.push_str("/>\n");
                         }
                         
                         xml.push_str("  </action>\n");
@@ -737,6 +770,8 @@ impl ActionMaps {
                                     input: rebind.input.clone(),
                                     input_type: format!("{:?}", input_type),
                                     display_name: rebind.get_display_name(),
+                                    activation_mode: rebind.activation_mode.clone(),
+                                    multi_tap: rebind.multi_tap,
                                 }
                             })
                             .collect();
@@ -1036,6 +1071,9 @@ pub struct MergedBinding {
     pub display_name: String,
     pub input_type: String,
     pub is_default: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_tap: Option<u32>,
+    pub activation_mode: String,
 }
 
 impl AllBinds {
@@ -1090,6 +1128,8 @@ impl AllBinds {
                                         display_name: rebind.get_display_name(),
                                         input_type: format!("{:?}", input_type),
                                         is_default: false,
+                                        multi_tap: rebind.multi_tap,
+                                        activation_mode: rebind.activation_mode.clone(),
                                     }
                                 }).collect();
                             
@@ -1103,13 +1143,15 @@ impl AllBinds {
                             if !custom_input_types.contains("Keyboard") {
                                 let kb_trimmed = all_binds_action.default_keyboard.trim();
                                 if !kb_trimmed.is_empty() && kb_trimmed != " " {
-                                    let rebind = Rebind { input: format!("kb1_{}", kb_trimmed) };
+                                    let rebind = Rebind { input: format!("kb1_{}", kb_trimmed), multi_tap: None, activation_mode: String::new() };
                                     let input_type = rebind.get_input_type();
                                     all_bindings.push(MergedBinding {
                                         input: rebind.input.clone(),
                                         display_name: rebind.get_display_name(),
                                         input_type: format!("{:?}", input_type),
                                         is_default: true,
+                                        multi_tap: None,
+                                        activation_mode: String::new(),
                                     });
                                 }
                             }
@@ -1118,13 +1160,15 @@ impl AllBinds {
                             if !custom_input_types.contains("Gamepad") {
                                 let gp_trimmed = all_binds_action.default_gamepad.trim();
                                 if !gp_trimmed.is_empty() && gp_trimmed != " " {
-                                    let rebind = Rebind { input: format!("gp1_{}", gp_trimmed) };
+                                    let rebind = Rebind { input: format!("gp1_{}", gp_trimmed), multi_tap: None, activation_mode: String::new() };
                                     let input_type = rebind.get_input_type();
                                     all_bindings.push(MergedBinding {
                                         input: rebind.input.clone(),
                                         display_name: rebind.get_display_name(),
                                         input_type: format!("{:?}", input_type),
                                         is_default: true,
+                                        multi_tap: None,
+                                        activation_mode: String::new(),
                                     });
                                 }
                             }
@@ -1133,13 +1177,15 @@ impl AllBinds {
                             if !custom_input_types.contains("Joystick") {
                                 let js_trimmed = all_binds_action.default_joystick.trim();
                                 if !js_trimmed.is_empty() && js_trimmed != " " {
-                                    let rebind = Rebind { input: format!("js1_{}", js_trimmed) };
+                                    let rebind = Rebind { input: format!("js1_{}", js_trimmed), multi_tap: None, activation_mode: String::new() };
                                     let input_type = rebind.get_input_type();
                                     all_bindings.push(MergedBinding {
                                         input: rebind.input.clone(),
                                         display_name: rebind.get_display_name(),
                                         input_type: format!("{:?}", input_type),
                                         is_default: true,
+                                        multi_tap: None,
+                                        activation_mode: String::new(),
                                     });
                                 }
                             }
@@ -1148,13 +1194,15 @@ impl AllBinds {
                             if !custom_input_types.contains("Mouse") {
                                 let mouse_trimmed = all_binds_action.default_mouse.trim();
                                 if !mouse_trimmed.is_empty() && mouse_trimmed != " " {
-                                    let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed) };
+                                    let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed), multi_tap: None, activation_mode: String::new() };
                                     let input_type = rebind.get_input_type();
                                     all_bindings.push(MergedBinding {
                                         input: rebind.input.clone(),
                                         display_name: rebind.get_display_name(),
                                         input_type: format!("{:?}", input_type),
                                         is_default: true,
+                                        multi_tap: None,
+                                        activation_mode: String::new(),
                                     });
                                 }
                             }
@@ -1167,52 +1215,60 @@ impl AllBinds {
                             // Add keyboard default if exists
                             let kb_trimmed = all_binds_action.default_keyboard.trim();
                             if !kb_trimmed.is_empty() && kb_trimmed != " " {
-                                let rebind = Rebind { input: format!("kb1_{}", kb_trimmed) };
+                                let rebind = Rebind { input: format!("kb1_{}", kb_trimmed), multi_tap: None, activation_mode: String::new() };
                                 let input_type = rebind.get_input_type();
                                 default_bindings.push(MergedBinding {
                                     input: rebind.input.clone(),
                                     display_name: rebind.get_display_name(),
                                     input_type: format!("{:?}", input_type),
                                     is_default: true,
+                                    multi_tap: None,
+                                    activation_mode: String::new(),
                                 });
                             }
                             
                             // Add gamepad default if exists
                             let gp_trimmed = all_binds_action.default_gamepad.trim();
                             if !gp_trimmed.is_empty() && gp_trimmed != " " {
-                                let rebind = Rebind { input: format!("gp1_{}", gp_trimmed) };
+                                let rebind = Rebind { input: format!("gp1_{}", gp_trimmed), multi_tap: None, activation_mode: String::new() };
                                 let input_type = rebind.get_input_type();
                                 default_bindings.push(MergedBinding {
                                     input: rebind.input.clone(),
                                     display_name: rebind.get_display_name(),
                                     input_type: format!("{:?}", input_type),
                                     is_default: true,
+                                    multi_tap: None,
+                                    activation_mode: String::new(),
                                 });
                             }
                             
                             // Add joystick default if exists
                             let js_trimmed = all_binds_action.default_joystick.trim();
                             if !js_trimmed.is_empty() && js_trimmed != " " {
-                                let rebind = Rebind { input: format!("js1_{}", js_trimmed) };
+                                let rebind = Rebind { input: format!("js1_{}", js_trimmed), multi_tap: None, activation_mode: String::new() };
                                 let input_type = rebind.get_input_type();
                                 default_bindings.push(MergedBinding {
                                     input: rebind.input.clone(),
                                     display_name: rebind.get_display_name(),
                                     input_type: format!("{:?}", input_type),
                                     is_default: true,
+                                    multi_tap: None,
+                                    activation_mode: String::new(),
                                 });
                             }
                             
                             // Add mouse default if exists
                             let mouse_trimmed = all_binds_action.default_mouse.trim();
                             if !mouse_trimmed.is_empty() && mouse_trimmed != " " {
-                                let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed) };
+                                let rebind = Rebind { input: format!("mouse1_{}", mouse_trimmed), multi_tap: None, activation_mode: String::new() };
                                 let input_type = rebind.get_input_type();
                                 default_bindings.push(MergedBinding {
                                     input: rebind.input.clone(),
                                     display_name: rebind.get_display_name(),
                                     input_type: format!("{:?}", input_type),
                                     is_default: true,
+                                    multi_tap: None,
+                                    activation_mode: String::new(),
                                 });
                             }
                             

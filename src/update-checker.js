@@ -204,6 +204,9 @@ export async function initializeUpdateChecker()
         });
     }, UPDATE_CHECK_INTERVAL);
 
+    // Make manual check available globally
+    window.manualUpdateCheck = manualUpdateCheck;
+
     // DEV: Key combo to show mock update (Ctrl+Alt+R, then T) - COMMENTED OUT FOR LIVE RELEASE
     // let devKeySequence = [];
     // window.addEventListener('keydown', (e) =>
@@ -227,5 +230,73 @@ export async function initializeUpdateChecker()
     //         }
     //     }
     // });
+}
+
+// Manual update check - resets the 4 hour timer
+async function manualUpdateCheck()
+{
+    const statusEl = document.getElementById('update-check-status');
+    if (statusEl)
+    {
+        statusEl.style.display = 'block';
+        statusEl.textContent = '🔄 Checking for updates...';
+        statusEl.style.color = '';
+    }
+
+    try
+    {
+        const latestRelease = await fetchLatestRelease();
+
+        if (!latestRelease)
+        {
+            if (statusEl)
+            {
+                statusEl.textContent = '❌ Failed to check for updates. Please try again later.';
+                statusEl.style.color = '#d9534f';
+            }
+            console.log('Could not fetch latest release info');
+            return;
+        }
+
+        const currentVersion = getCurrentVersion();
+        console.log(`Manual check - Current version: ${currentVersion}, Latest version: ${latestRelease.version}`);
+
+        // Compare versions
+        if (compareVersions(currentVersion, latestRelease.version) < 0)
+        {
+            console.log(`Update available: v${latestRelease.version}`);
+            showUpdateIndicator(latestRelease.version);
+
+            if (statusEl)
+            {
+                statusEl.textContent = `✨ Update available: v${latestRelease.version}`;
+                statusEl.style.color = '#9bdb9a';
+            }
+
+            // Store update info
+            localStorage.setItem('latestVersion', latestRelease.version);
+        } else
+        {
+            console.log('App is up to date');
+            hideUpdateIndicator();
+
+            if (statusEl)
+            {
+                statusEl.textContent = '✓ You are running the latest version!';
+                statusEl.style.color = '#9bdb9a';
+            }
+        }
+
+        // Reset the 4-hour timer
+        localStorage.setItem('updateCheckTime', Date.now().toString());
+    } catch (error)
+    {
+        console.error('Error during manual update check:', error);
+        if (statusEl)
+        {
+            statusEl.textContent = '❌ Error checking for updates';
+            statusEl.style.color = '#d9534f';
+        }
+    }
 }
 

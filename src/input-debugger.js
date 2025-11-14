@@ -156,12 +156,23 @@ function addEvent(inputData)
         modifiersDisplay = `<div class="event-modifiers">🎮 Modifiers: ${modifiersText}</div>`;
     }
 
+    let uuidDisplay = '';
+    if (inputData.device_uuid)
+    {
+        uuidDisplay = `
+            <div class="event-uuid">
+                <span class="uuid-label">UUID:</span>
+                <code>${inputData.device_uuid}</code>
+            </div>`;
+    }
+
     eventEl.innerHTML = `
         <div class="event-time">${timeString}</div>
         <div class="event-details">
             <div class="event-input">${inputData.input_string}</div>
             <div class="event-display">${inputData.display_name}</div>
             ${valueDisplay}
+            ${uuidDisplay}
             ${modifiersDisplay}
         </div>
         <div class="event-type ${cssClass}">${displayType}</div>
@@ -335,7 +346,8 @@ function handleKeyboardInput(event)
         device_type: 'Keyboard',
         axis_value: null,
         modifiers: modifiers,
-        is_modifier: ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].includes(scKey)
+        is_modifier: ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].includes(scKey),
+        device_uuid: null,
     });
 }
 

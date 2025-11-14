@@ -200,6 +200,31 @@
     display: inline-block;
 }
 
+.event-uuid {
+    font-size: 0.85em;
+    color: #4ec9b0;
+    font-family: 'Courier New', monospace;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.event-uuid .uuid-label {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #8bf0d9;
+    font-size: 0.75em;
+}
+
+.event-uuid code {
+    background: rgba(78, 201, 176, 0.12);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #aaf7dc;
+}
+
 .event-type {
     padding: 4px 8px;
     border-radius: 4px;

@@ -122,12 +122,16 @@ fn update_binding(
     action_map_name: String,
     action_name: String,
     new_input: String,
+    multi_tap: Option<u32>,
+    activation_mode: Option<String>,
     state: tauri::State<Mutex<AppState>>
 ) -> Result<(), String> {
     eprintln!("update_binding called with:");
     eprintln!("  action_map_name: '{}'", action_map_name);
     eprintln!("  action_name: '{}'", action_name);
     eprintln!("  new_input: '{}'", new_input);
+    eprintln!("  multi_tap: {:?}", multi_tap);
+    eprintln!("  activation_mode: {:?}", activation_mode);
     
     let mut app_state = state.lock().unwrap();
     
@@ -144,19 +148,29 @@ fn update_binding(
             if let Some(action) = action_map.actions.iter_mut().find(|a| a.name == action_name) {
                 eprintln!("Found action: '{}'", action_name);
                 
-                // Determine the input type of the new binding
+                // Create the new rebind
                 let new_rebind = keybindings::Rebind {
                     input: new_input.clone(),
+                    multi_tap,
+                    activation_mode: activation_mode.unwrap_or_default(),
                 };
-                let new_input_type = new_rebind.get_input_type();
-                eprintln!("New binding input type: {:?}", new_input_type);
+                eprintln!("New rebind: input='{}', multi_tap={:?}, activation_mode='{}'", 
+                         new_rebind.input, new_rebind.multi_tap, new_rebind.activation_mode);
                 
-                // Remove any existing rebinds of the same input type
-                action.rebinds.retain(|r| r.get_input_type() != new_input_type);
+                // Check if we're updating an existing binding with the exact same input
+                let existing_index = action.rebinds.iter().position(|r| r.input == new_input);
                 
-                // Add the new binding
-                action.rebinds.push(new_rebind);
-                eprintln!("Successfully updated binding (replaced same input type)");
+                if let Some(index) = existing_index {
+                    // Update the existing binding
+                    eprintln!("Updating existing binding at index {}", index);
+                    action.rebinds[index] = new_rebind;
+                } else {
+                    // Add as a new binding
+                    eprintln!("Adding new binding");
+                    action.rebinds.push(new_rebind);
+                }
+                
+                eprintln!("Successfully updated binding");
                 return Ok(());
             } else {
                 eprintln!("Action '{}' not found in action map", action_name);
@@ -204,6 +218,8 @@ fn update_binding(
                         // Update existing action - replace bindings of the same input type
                         let new_rebind = keybindings::Rebind {
                             input: new_input.clone(),
+                            multi_tap,
+                            activation_mode: activation_mode.clone().unwrap_or_default(),
                         };
                         let new_input_type = new_rebind.get_input_type();
                         
@@ -220,6 +236,8 @@ fn update_binding(
                             name: action_name.clone(),
                             rebinds: vec![keybindings::Rebind {
                                 input: new_input,
+                                multi_tap,
+                                activation_mode: activation_mode.clone().unwrap_or_default(),
                             }],
                         };
                         action_map.actions.push(new_action);
@@ -232,6 +250,8 @@ fn update_binding(
                         name: action_name.clone(),
                         rebinds: vec![keybindings::Rebind {
                             input: new_input,
+                            multi_tap,
+                            activation_mode: activation_mode.unwrap_or_default(),
                         }],
                     };
                     let new_action_map = ActionMaps::new_empty_action_map(action_map_name.clone(), vec![new_action]);
@@ -462,6 +482,8 @@ fn clear_specific_binding(
     // Determine the input type of the binding to clear
     let clear_rebind = keybindings::Rebind {
         input: input_to_clear.clone(),
+        multi_tap: None,
+        activation_mode: String::new(),
     };
     let input_type = clear_rebind.get_input_type();
     eprintln!("Input type to clear: {:?}", input_type);
@@ -597,6 +619,8 @@ fn clear_specific_binding(
         // Add the cleared binding (with trailing space to indicate it's explicitly unbound)
         action.rebinds.push(keybindings::Rebind {
             input: cleared_input,
+            multi_tap: None,
+            activation_mode: String::new(),
         });
         
         eprintln!("Successfully cleared binding with explicit unbind entry");
@@ -604,6 +628,14 @@ fn clear_specific_binding(
     } else {
         Err("Failed to initialize bindings".to_string())
     }
+}
+
+#[tauri::command]
+fn clear_custom_bindings(state: tauri::State<Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().unwrap();
+    app_state.current_bindings = None;
+    app_state.current_file_name = None;
+    Ok(())
 }
 
 #[tauri::command]
@@ -828,6 +860,7 @@ pub fn run() {
             get_merged_bindings,
             find_conflicting_bindings,
             clear_specific_binding,
+            clear_custom_bindings,
             scan_sc_installations,
             get_current_file_name,
             save_bindings_to_install,

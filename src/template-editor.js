@@ -27,7 +27,7 @@ import
 } from './button-renderer.js';
 
 // Lazy imports - will be loaded when needed
-let parseInputDisplayName, parseInputShortName, getInputType;
+let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat;
 
 // Load utilities when template editor initializes
 async function loadUtilities()
@@ -38,6 +38,7 @@ async function loadUtilities()
         parseInputDisplayName = utils.parseInputDisplayName;
         parseInputShortName = utils.parseInputShortName;
         getInputType = utils.getInputType;
+        toStarCitizenFormat = utils.toStarCitizenFormat;
     }
 }
 
@@ -150,7 +151,8 @@ function initializeEventListeners()
         markAsChanged();
         if (window.updateTemplateIndicator)
         {
-            window.updateTemplateIndicator(e.target.value);
+            const savedFileName = localStorage.getItem('templateFileName');
+            window.updateTemplateIndicator(e.target.value, savedFileName);
         }
     });
 
@@ -398,6 +400,195 @@ function getCurrentButtons()
     }
 }
 
+function getCurrentStickData()
+{
+    return currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
+}
+
+function getCurrentStickJoystickNumber()
+{
+    const stickData = getCurrentStickData();
+    if (stickData && stickData.joystickNumber)
+    {
+        return stickData.joystickNumber;
+    }
+
+    if (templateData.joystickNumber)
+    {
+        return templateData.joystickNumber;
+    }
+
+    return currentStick === 'left' ? 1 : 2;
+}
+
+function getInputDisplayInfo(button, jsNumOverride = null)
+{
+    const info = {
+        shortLabel: null,
+        fullId: null,
+        type: null
+    };
+
+    if (!button)
+    {
+        return info;
+    }
+
+    const jsNum = jsNumOverride || getCurrentStickJoystickNumber();
+
+    const normalizePrefix = (inputString) =>
+    {
+        if (!inputString)
+        {
+            return null;
+        }
+
+        const lower = inputString.toLowerCase();
+        if (lower.match(/^(js|gp)\d+_/))
+        {
+            return lower.replace(/^(js|gp)\d+_/, `js${jsNum}_`);
+        }
+        return lower;
+    };
+
+    const setFromString = (inputString) =>
+    {
+        const normalized = normalizePrefix(inputString);
+        if (!normalized)
+        {
+            return;
+        }
+
+        info.fullId = normalized;
+
+        if (normalized.includes('_axis'))
+        {
+            info.type = 'axis';
+            const axisMatch = normalized.match(/axis(\d+)(?:_(positive|negative))?/);
+            if (axisMatch)
+            {
+                let dirSymbol = '';
+                if (axisMatch[2] === 'positive')
+                {
+                    dirSymbol = '+';
+                }
+                else if (axisMatch[2] === 'negative')
+                {
+                    dirSymbol = '-';
+                }
+                else if (axisMatch[2])
+                {
+                    dirSymbol = axisMatch[2];
+                }
+
+                info.shortLabel = dirSymbol ? `Axis ${axisMatch[1]} ${dirSymbol}` : `Axis ${axisMatch[1]}`;
+            }
+            else
+            {
+                info.shortLabel = 'Axis';
+            }
+        }
+        else if (normalized.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider)$/))
+        {
+            // Star Citizen axis names (e.g., js1_x, js1_y, js1_rotx)
+            info.type = 'axis';
+            const scAxisMatch = normalized.match(/_(x|y|z|rotx|roty|rotz|slider)$/);
+            if (scAxisMatch)
+            {
+                const axisName = scAxisMatch[1].toUpperCase();
+                info.shortLabel = `Axis ${axisName}`;
+            }
+            else
+            {
+                info.shortLabel = 'Axis';
+            }
+        }
+        else if (normalized.includes('_button'))
+        {
+            info.type = 'button';
+            const btnMatch = normalized.match(/button(\d+)/);
+            info.shortLabel = btnMatch ? `Button ${btnMatch[1]}` : 'Button';
+        }
+        else
+        {
+            info.type = 'input';
+            info.shortLabel = normalized;
+        }
+    };
+
+    if (button.inputs && button.inputs.main)
+    {
+        if (typeof button.inputs.main === 'string')
+        {
+            setFromString(button.inputs.main);
+        }
+        else if (typeof button.inputs.main === 'object')
+        {
+            const main = button.inputs.main;
+
+            if (main.type === 'axis' && main.id !== undefined)
+            {
+                const directionSuffix = main.direction ? `_${main.direction}` : '';
+                setFromString(`js${jsNum}_axis${main.id}${directionSuffix}`);
+            }
+            else if (main.type === 'button' && main.id !== undefined)
+            {
+                setFromString(`js${jsNum}_button${main.id}`);
+            }
+            else if (typeof main.input === 'string')
+            {
+                setFromString(main.input);
+            }
+            else if (main.id !== undefined)
+            {
+                info.shortLabel = `Input ${main.id}`;
+                info.fullId = main.id.toString();
+            }
+        }
+    }
+    else if (button.buttonId !== undefined && button.buttonId !== null)
+    {
+        setFromString(`js${jsNum}_button${button.buttonId}`);
+    }
+    else if (button.inputType && button.inputId !== undefined)
+    {
+        if (button.inputType === 'axis')
+        {
+            const directionSuffix = button.axisDirection ? `_${button.axisDirection}` : '';
+            setFromString(`js${jsNum}_axis${button.inputId}${directionSuffix}`);
+        }
+        else if (button.inputType === 'button')
+        {
+            setFromString(`js${jsNum}_button${button.inputId}`);
+        }
+    }
+
+    return info;
+}
+
+function updateSimpleInputPreview(button = null)
+{
+    const displayInfo = getInputDisplayInfo(button);
+    const numberEl = document.getElementById('button-id-display');
+    const idEl = document.getElementById('button-full-id-display');
+
+    if (!numberEl || !idEl)
+    {
+        return;
+    }
+
+    if (displayInfo.shortLabel)
+    {
+        numberEl.textContent = displayInfo.shortLabel;
+        idEl.textContent = displayInfo.fullId || displayInfo.shortLabel;
+    }
+    else
+    {
+        numberEl.textContent = '—';
+        idEl.textContent = '—';
+    }
+}
+
 // Set current stick's button array
 function setCurrentButtons(buttons)
 {
@@ -433,10 +624,26 @@ async function newTemplate()
     if ((templateData.name ||
         templateData.imagePath ||
         templateData.leftStick.buttons.length > 0 ||
-        templateData.rightStick.buttons.length > 0) &&
-        !await confirm('Start a new template? Any unsaved changes will be lost.'))
+        templateData.rightStick.buttons.length > 0))
     {
-        return;
+        const showConfirmation = window.showConfirmation;
+        if (!showConfirmation)
+        {
+            console.error('showConfirmation not available');
+            return;
+        }
+
+        const confirmed = await showConfirmation(
+            'Start a new template? Any unsaved changes will be lost.',
+            'New Template',
+            'Start New',
+            'Cancel'
+        );
+
+        if (!confirmed)
+        {
+            return;
+        }
     }
 
     // Reset all data
@@ -691,7 +898,21 @@ function drawButton(button, isTemp = false)
     {
         ctx.save();
         ctx.globalAlpha = alpha;
-        const lineColor = isHat ? '#666' : '#d9534f';
+
+        let lineColor = '#d9534f'; // Default to bound color
+
+        if (isHat)
+        {
+            // For hats, check if at least the four cardinal directions are bound
+            const hasCardinalDirections = button.inputs &&
+                button.inputs.up &&
+                button.inputs.down &&
+                button.inputs.left &&
+                button.inputs.right;
+
+            lineColor = hasCardinalDirections ? '#d9534f' : '#666'; // Bound color if all cardinals exist, grey otherwise
+        }
+
         // Use shared drawConnectingLine function
         // Note: Need to scale offset for zoom level in template editor
         const labelWidth = isHat ? 0 : 140;
@@ -1456,7 +1677,6 @@ function updateButtonList()
     {
         let inputInfo = '';
 
-        // Handle new structure with buttonType and inputs
         if (button.buttonType === 'hat4way' && button.inputs)
         {
             const directions = [];
@@ -1467,33 +1687,17 @@ function updateButtonList()
             if (button.inputs.push) directions.push('⬇');
             inputInfo = ` - Hat (${directions.join(' ')})`;
         }
-        else if (button.inputs && button.inputs.main)
+        else
         {
-            // Simple button with new structure
-            const input = button.inputs.main;
-            if (input.type === 'button')
+            const displayInfo = getInputDisplayInfo(button);
+            if (displayInfo.shortLabel)
             {
-                inputInfo = ` - Button ${input.id}`;
+                inputInfo = ` - ${displayInfo.shortLabel}`;
             }
-            else if (input.type === 'axis')
+            else if (button.inputType && button.inputId !== undefined)
             {
-                inputInfo = ` - Axis ${input.id}`;
-            }
-        }
-        // Legacy support for old structure
-        else if (button.inputType && button.inputId !== undefined)
-        {
-            if (button.inputType === 'button')
-            {
-                inputInfo = ` - Button ${button.inputId}`;
-            }
-            else if (button.inputType === 'axis')
-            {
-                inputInfo = ` - Axis ${button.inputId}`;
-            }
-            else if (button.inputType === 'hat')
-            {
-                inputInfo = ` - Hat ${button.inputId}`;
+                const label = button.inputType === 'axis' ? 'Axis' : (button.inputType === 'button' ? 'Button' : 'Input');
+                inputInfo = ` - ${label} ${button.inputId}`;
             }
         }
 
@@ -1542,53 +1746,7 @@ window.editButtonFromList = function (buttonId)
     // Load buttonId for simple buttons
     if (buttonType === 'simple')
     {
-        const buttonIdDisplay = document.getElementById('button-id-display');
-        const fullIdDisplay = document.getElementById('button-full-id-display');
-
-        // Get joystick number from current stick
-        const currentStickData = currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
-        const jsNum = (currentStickData && currentStickData.joystickNumber) || templateData.joystickNumber || 1;
-
-        if (button.buttonId !== undefined && button.buttonId !== null)
-        {
-            buttonIdDisplay.textContent = button.buttonId;
-            fullIdDisplay.textContent = `js${jsNum}_button${button.buttonId}`;
-        }
-        else if (button.inputs && button.inputs.main)
-        {
-            // Handle both new format (object with id) and legacy format (string)
-            const main = button.inputs.main;
-            if (typeof main === 'object' && main.id !== undefined)
-            {
-                buttonIdDisplay.textContent = main.id;
-                fullIdDisplay.textContent = `js${jsNum}_button${main.id}`;
-            }
-            else if (typeof main === 'string')
-            {
-                // Extract button number from string like "js1_button3"
-                const match = main.match(/button(\d+)/);
-                if (match)
-                {
-                    buttonIdDisplay.textContent = match[1];
-                    fullIdDisplay.textContent = `js${jsNum}_button${match[1]}`;
-                }
-                else
-                {
-                    buttonIdDisplay.textContent = '—';
-                    fullIdDisplay.textContent = '—';
-                }
-            }
-            else
-            {
-                buttonIdDisplay.textContent = '—';
-                fullIdDisplay.textContent = '—';
-            }
-        }
-        else
-        {
-            buttonIdDisplay.textContent = '—';
-            fullIdDisplay.textContent = '—';
-        }
+        updateSimpleInputPreview(tempButton);
     }
     // If it's a hat, populate the detected inputs
     else if (buttonType === 'hat4way' && button.inputs)
@@ -1728,7 +1886,8 @@ async function saveButtonDetails()
 
     if (!name)
     {
-        await alert('Please enter a button name');
+        const showAlert = window.showAlert || alert;
+        await showAlert('Please enter a button name', 'Missing Name');
         return;
     }
 
@@ -1809,7 +1968,8 @@ async function deleteCurrentButton(event)
 
     if (indexBeforeConfirm === -1)
     {
-        await alert('Error: This button has already been deleted!');
+        const showAlert = window.showAlert || alert;
+        await showAlert('Error: This button has already been deleted!', 'Delete Button');
         closeButtonModal();
         tempButton = null;
         updateButtonList();
@@ -2118,6 +2278,14 @@ async function startInputDetection()
             adjustedInputString = adjustedInputString.replace(/^(js|gp)\d+_/, `js${templateJsNum}_`);
             console.log('Adjusted input string (remapped to template js number):', adjustedInputString);
 
+            // Convert to Star Citizen axis format if it's an axis (e.g., js1_axis2 -> js1_y)
+            const scFormatString = toStarCitizenFormat(adjustedInputString);
+            if (scFormatString)
+            {
+                adjustedInputString = scFormatString;
+                console.log('Converted to Star Citizen format:', adjustedInputString);
+            }
+
             // Use shared utility for friendly name (use adjusted string)
             const inputName = parseInputDisplayName(adjustedInputString);
 
@@ -2138,22 +2306,50 @@ async function startInputDetection()
                     tempButton.name = inputName;
                 }
 
-                // Extract button ID if it's a button
-                const match = adjustedInputString.match(/button(\d+)/);
-                if (match)
+                if (!tempButton.inputs)
                 {
-                    const buttonId = parseInt(match[1]);
-                    tempButton.buttonId = buttonId;
-
-                    // Store the full SC input string (e.g., "js1_button3")
-                    tempButton.inputs = {
-                        main: adjustedInputString
-                    };
-
-                    // Update the displays
-                    document.getElementById('button-id-display').textContent = buttonId;
-                    document.getElementById('button-full-id-display').textContent = adjustedInputString;
+                    tempButton.inputs = {};
                 }
+
+                tempButton.inputs.main = adjustedInputString;
+
+                const buttonMatch = adjustedInputString.match(/button(\d+)/);
+                const axisNumericMatch = adjustedInputString.match(/axis(\d+)(?:_(positive|negative))?/);
+                const axisSCMatch = adjustedInputString.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider)$/);
+
+                if (buttonMatch)
+                {
+                    const buttonId = parseInt(buttonMatch[1]);
+                    tempButton.buttonId = buttonId;
+                    tempButton.inputType = 'button';
+                    tempButton.inputId = buttonId;
+                    delete tempButton.axisDirection;
+                }
+                else if (axisNumericMatch)
+                {
+                    const axisId = parseInt(axisNumericMatch[1]);
+                    delete tempButton.buttonId;
+                    tempButton.inputType = 'axis';
+                    tempButton.inputId = axisId;
+                    tempButton.axisDirection = axisNumericMatch[2] || null;
+                }
+                else if (axisSCMatch)
+                {
+                    // Star Citizen axis format (e.g., js1_x, js1_y)
+                    delete tempButton.buttonId;
+                    tempButton.inputType = 'axis';
+                    tempButton.inputId = axisSCMatch[2]; // Store the axis name (x, y, z, etc.)
+                    delete tempButton.axisDirection;
+                }
+                else
+                {
+                    delete tempButton.buttonId;
+                    delete tempButton.axisDirection;
+                    tempButton.inputType = 'input';
+                    tempButton.inputId = undefined;
+                }
+
+                updateSimpleInputPreview(tempButton);
             }
 
             // Show confirmation
@@ -2249,8 +2445,10 @@ function clearSimpleButtonInput()
 
     tempButton.inputs = {};
     tempButton.buttonId = undefined;
-    document.getElementById('button-id-display').textContent = '—';
-    document.getElementById('button-full-id-display').textContent = '—';
+    delete tempButton.inputType;
+    delete tempButton.inputId;
+    delete tempButton.axisDirection;
+    updateSimpleInputPreview(tempButton);
     document.getElementById('input-detection-status').style.display = 'none';
 
     markAsChanged();
@@ -2288,16 +2486,18 @@ function clearHatDirection(direction)
 // Template save/load
 async function saveTemplate()
 {
+    const showAlert = window.showAlert || alert;
+
     if (!templateData.name)
     {
-        await alert('Please enter a template name');
+        await showAlert('Please enter a template name', 'Missing Template Name');
         document.getElementById('template-name').focus();
         return;
     }
 
     if (!loadedImage)
     {
-        await alert('Please load a joystick image');
+        await showAlert('Please load a joystick image', 'No Image Loaded');
         return;
     }
 
@@ -2306,7 +2506,7 @@ async function saveTemplate()
     {
         if (!templateData.leftImageDataUrl || !templateData.rightImageDataUrl)
         {
-            await alert('Please load images for both left and right sticks');
+            await showAlert('Please load images for both left and right sticks', 'Images Required');
             return;
         }
     }
@@ -2320,7 +2520,7 @@ async function saveTemplate()
 
     if (totalButtons === 0)
     {
-        await alert('Please add at least one button to either stick');
+        await showAlert('Please add at least one button to either stick', 'No Buttons Defined');
         return;
     }
 
@@ -2342,7 +2542,7 @@ async function saveTemplate()
                 name: 'Joystick Template',
                 extensions: ['json']
             }],
-            defaultPath: resourceDir ? `${resourceDir}/${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json` : `${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json`
+            defaultPath: resourceDir
         });
 
         if (!filePath) return; // User cancelled
@@ -2406,7 +2606,8 @@ async function saveTemplate()
 
         // Persist to localStorage
         localStorage.setItem('currentTemplate', JSON.stringify(saveData));
-        localStorage.setItem('templateFileName', filePath.split(/[\\\/]/).pop());
+        const fileName = filePath.split(/[\\\/]/).pop();
+        localStorage.setItem('templateFileName', fileName);
 
         // Clear unsaved changes
         hasUnsavedChanges = false;
@@ -2415,29 +2616,31 @@ async function saveTemplate()
         // Update header template name
         if (window.updateTemplateIndicator)
         {
-            window.updateTemplateIndicator(templateData.name);
+            window.updateTemplateIndicator(templateData.name, fileName);
         }
 
-        await alert('Template saved successfully!');
+        await showAlert('Template saved successfully!', 'Template Saved');
     } catch (error)
     {
         console.error('Error saving template:', error);
-        await alert(`Failed to save template: ${error}`);
+        await showAlert(`Failed to save template: ${error}`, 'Error');
     }
 }
 
 async function saveTemplateAs()
 {
+    const showAlert = window.showAlert || alert;
+
     if (!templateData.name)
     {
-        await alert('Please enter a template name');
+        await showAlert('Please enter a template name', 'Missing Template Name');
         document.getElementById('template-name').focus();
         return;
     }
 
     if (!loadedImage)
     {
-        await alert('Please load a joystick image');
+        await showAlert('Please load a joystick image', 'No Image Loaded');
         return;
     }
 
@@ -2446,7 +2649,7 @@ async function saveTemplateAs()
     {
         if (!templateData.leftImageDataUrl || !templateData.rightImageDataUrl)
         {
-            await alert('Please load images for both left and right sticks');
+            await showAlert('Please load images for both left and right sticks', 'Images Required');
             return;
         }
     }
@@ -2460,7 +2663,7 @@ async function saveTemplateAs()
 
     if (totalButtons === 0)
     {
-        await alert('Please add at least one button to either stick');
+        await showAlert('Please add at least one button to either stick', 'No Buttons Defined');
         return;
     }
 
@@ -2483,7 +2686,7 @@ async function saveTemplateAs()
                 name: 'Joystick Template',
                 extensions: ['json']
             }],
-            defaultPath: resourceDir ? `${resourceDir}/${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json` : `${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json`
+            defaultPath: resourceDir
         });
 
         if (!filePath) return; // User cancelled
@@ -2519,6 +2722,7 @@ async function saveTemplateAs()
                     labelPos: b.labelPos,
                     buttonType: b.buttonType || 'simple',
                     inputs: b.inputs || {},
+                    // Legacy support
                     inputType: b.inputType,
                     inputId: b.inputId
                 }))
@@ -2532,6 +2736,7 @@ async function saveTemplateAs()
                     labelPos: b.labelPos,
                     buttonType: b.buttonType || 'simple',
                     inputs: b.inputs || {},
+                    // Legacy support
                     inputType: b.inputType,
                     inputId: b.inputId
                 }))
@@ -2545,7 +2750,8 @@ async function saveTemplateAs()
 
         // Persist to localStorage
         localStorage.setItem('currentTemplate', JSON.stringify(saveData));
-        localStorage.setItem('templateFileName', filePath.split(/[\\\/]/).pop());
+        const fileName = filePath.split(/[\\\/]/).pop();
+        localStorage.setItem('templateFileName', fileName);
 
         // Clear unsaved changes
         hasUnsavedChanges = false;
@@ -2554,14 +2760,14 @@ async function saveTemplateAs()
         // Update header template name
         if (window.updateTemplateIndicator)
         {
-            window.updateTemplateIndicator(templateData.name);
+            window.updateTemplateIndicator(templateData.name, fileName);
         }
 
-        await alert('Template saved successfully!');
+        await showAlert('Template saved successfully!', 'Template Saved');
     } catch (error)
     {
         console.error('Error saving template:', error);
-        await alert(`Failed to save template: ${error}`);
+        await showAlert(`Failed to save template: ${error}`, 'Error');
     }
 }
 
@@ -2657,7 +2863,8 @@ async function loadTemplate()
 
         // Persist to localStorage
         localStorage.setItem('currentTemplate', JSON.stringify(data));
-        localStorage.setItem('templateFileName', filePath.split(/[\\\/]/).pop());
+        const fileName = filePath.split(/[\\\/]/).pop();
+        localStorage.setItem('templateFileName', fileName);
 
         // Reset unsaved changes
         hasUnsavedChanges = false;
@@ -2668,8 +2875,8 @@ async function loadTemplate()
         console.log('window.updateTemplateIndicator exists:', typeof window.updateTemplateIndicator);
         if (window.updateTemplateIndicator)
         {
-            console.log('Calling updateTemplateIndicator with:', data.name || 'Untitled Template');
-            window.updateTemplateIndicator(data.name || 'Untitled Template');
+            console.log('Calling updateTemplateIndicator with:', data.name || 'Untitled Template', fileName);
+            window.updateTemplateIndicator(data.name || 'Untitled Template', fileName);
         }
         else
         {
@@ -2754,7 +2961,8 @@ async function loadTemplate()
     } catch (error)
     {
         console.error('Error loading template:', error);
-        await alert(`Failed to load template: ${error}`);
+        const showAlert = window.showAlert || alert;
+        await showAlert(`Failed to load template: ${error}`, 'Error');
     }
 }
 
@@ -3259,7 +3467,8 @@ async function saveTemplateJoystickMapping()
 
     if (!hasRightStick && !hasLeftStick)
     {
-        await alert('Please detect at least one joystick before saving.');
+        const showAlert = window.showAlert || alert;
+        await showAlert('Please detect at least one joystick before saving.', 'No Joystick Detected');
         return;
     }
 
