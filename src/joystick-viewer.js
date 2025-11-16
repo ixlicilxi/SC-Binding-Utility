@@ -42,7 +42,7 @@ let isPanning = false;
 let lastPanPosition = { x: 0, y: 0 };
 
 // Filter state
-let currentStick = 'right'; // Currently viewing 'left' or 'right'
+let currentPageIndex = 0; // Currently viewing page index
 let hideDefaultBindings = false; // Filter to hide default bindings
 let modifierFilter = 'all'; // Current modifier filter: 'all', 'lalt', 'lctrl', etc.
 
@@ -67,7 +67,16 @@ const DrawMode = {
 // Helper to get current joystick number
 function getCurrentJoystickNumber()
 {
-    const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
+    if (!currentTemplate) return 1;
+
+    // New pages structure
+    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    {
+        return currentTemplate.pages[currentPageIndex].joystickNumber || 1;
+    }
+
+    // Fallback for legacy structure
+    const currentStickData = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
     return (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
 }
 
@@ -187,11 +196,20 @@ window.initializeVisualView = function ()
 
 function initializeEventListeners()
 {
-    // Stick selector buttons
-    const leftStickBtn = document.getElementById('viewer-left-stick-btn');
-    const rightStickBtn = document.getElementById('viewer-right-stick-btn');
-    if (leftStickBtn) leftStickBtn.addEventListener('click', () => switchStick('left'));
-    if (rightStickBtn) rightStickBtn.addEventListener('click', () => switchStick('right'));
+    // Page selector buttons - will be populated dynamically when template loads
+    const pageSelectorContainer = document.getElementById('viewer-stick-selector');
+    if (pageSelectorContainer)
+    {
+        pageSelectorContainer.addEventListener('click', (e) =>
+        {
+            const btn = e.target.closest('[data-page-index]');
+            if (btn)
+            {
+                const pageIndex = parseInt(btn.dataset.pageIndex, 10);
+                switchPage(pageIndex);
+            }
+        });
+    }
 
     // Hide defaults toggle button
     const hideDefaultsBtn = document.getElementById('hide-defaults-toggle');
@@ -251,6 +269,7 @@ function initializeEventListeners()
         canvas.addEventListener('mousemove', onCanvasMouseMove);
         canvas.addEventListener('mousedown', onCanvasMouseDown);
         canvas.addEventListener('mouseup', onCanvasMouseUp);
+        canvas.addEventListener('contextmenu', onCanvasContextMenu);
         canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
     }
 }
@@ -259,19 +278,9 @@ async function loadCurrentBindings()
 {
     try
     {
-        // First try to get working copy from localStorage
-        const workingBindings = localStorage.getItem('workingBindings');
-
-        if (workingBindings)
-        {
-            console.log('Loading working copy of bindings from localStorage');
-            currentBindings = JSON.parse(workingBindings);
-            console.log('Loaded bindings with', currentBindings.action_maps?.length, 'action maps');
-            return;
-        }
-
-        // Fallback: get merged bindings from backend (AllBinds + user customizations)
-        console.log('No working copy found, loading from backend');
+        // Always get fresh merged bindings from backend (AllBinds + user customizations)
+        // No need to cache - backend is the single source of truth
+        console.log('Loading bindings from backend');
         currentBindings = await invoke('get_merged_bindings');
         console.log('Loaded bindings from backend with', currentBindings.action_maps?.length, 'action maps');
     } catch (error)
@@ -356,13 +365,11 @@ function restoreViewState()
 {
     try
     {
-        // Restore current stick selection
-        const savedStick = localStorage.getItem('viewerCurrentStick');
-        if (savedStick && (savedStick === 'left' || savedStick === 'right'))
+        // Restore current page index
+        const savedPageIndex = localStorage.getItem('viewerCurrentPageIndex');
+        if (savedPageIndex !== null)
         {
-            currentStick = savedStick;
-            document.getElementById('viewer-left-stick-btn').classList.toggle('active', savedStick === 'left');
-            document.getElementById('viewer-right-stick-btn').classList.toggle('active', savedStick === 'right');
+            currentPageIndex = parseInt(savedPageIndex, 10) || 0;
         }
 
         // Restore hide defaults preference
@@ -457,6 +464,22 @@ function loadPersistedTemplate()
         {
             currentTemplate = normalizeTemplateData(savedTemplate);
 
+            // Validate currentPageIndex against available pages
+            let maxPages = 0;
+            if (currentTemplate.pages && currentTemplate.pages.length > 0)
+            {
+                maxPages = currentTemplate.pages.length;
+            }
+            else if (currentTemplate.leftStick || currentTemplate.rightStick)
+            {
+                maxPages = 2; // Legacy dual-stick
+            }
+
+            if (currentPageIndex >= maxPages)
+            {
+                currentPageIndex = 0;
+            }
+
             // Update header template name
             const savedFileName = localStorage.getItem('templateFileName');
             if (window.updateTemplateIndicator)
@@ -472,40 +495,47 @@ function loadPersistedTemplate()
     }
 }
 
-// Stick switching
-function switchStick(stick)
+// Page switching
+function switchPage(pageIndex)
 {
-    if (currentStick === stick) return;
+    if (!currentTemplate || !currentTemplate.pages || pageIndex < 0 || pageIndex >= currentTemplate.pages.length)
+    {
+        return;
+    }
 
-    currentStick = stick;
+    if (currentPageIndex === pageIndex) return;
+
+    currentPageIndex = pageIndex;
 
     // Save to localStorage
     ViewerState.saveViewState();
 
     // Update button states
-    document.getElementById('viewer-left-stick-btn').classList.toggle('active', stick === 'left');
-    document.getElementById('viewer-right-stick-btn').classList.toggle('active', stick === 'right');
+    updatePageSelectorButtons();
 
-    // Redraw with new stick
-    if (window.viewerImage)
-    {
-        resizeViewerCanvas();
-    }
+    // Load image for new page
+    loadPageImage();
 }
 
-// Get current stick's button array
+// Get current page's button array
 function getCurrentButtons()
 {
     if (!currentTemplate) return [];
 
-    // Handle old format with single buttons array
-    if (currentTemplate.buttons && !currentTemplate.rightStick)
+    // New pages structure
+    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
     {
-        return currentStick === 'left' ? [] : currentTemplate.buttons;
+        return currentTemplate.pages[currentPageIndex].buttons || [];
     }
 
-    // Get the appropriate stick
-    const stick = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
+    // Legacy support: Handle old format with single buttons array
+    if (currentTemplate.buttons && !currentTemplate.rightStick)
+    {
+        return currentPageIndex === 0 ? [] : currentTemplate.buttons;
+    }
+
+    // Legacy support: Get the appropriate stick
+    const stick = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
 
     // Handle nested structure: { joystickNumber: 1, buttons: [...] }
     if (stick && typeof stick === 'object' && !Array.isArray(stick))
@@ -564,12 +594,141 @@ function displayTemplate()
         toolbar.style.display = 'flex';
     }
 
+    // Create page selector buttons
+    createPageSelectorButtons();
+
+    // Load the image for the current page
+    loadPageImage();
+}
+
+function createPageSelectorButtons()
+{
+    const selectorEl = document.getElementById('viewer-stick-selector');
+    if (!selectorEl) return;
+
+    // Clear existing buttons
+    selectorEl.innerHTML = '';
+
+    // Determine number of pages
+    let pages = [];
+    if (currentTemplate.pages && currentTemplate.pages.length > 0)
+    {
+        // New multi-page structure
+        pages = currentTemplate.pages;
+    }
+    else
+    {
+        // Legacy dual-stick structure
+        const hasLeftStick = currentTemplate.leftStick &&
+            (Array.isArray(currentTemplate.leftStick) ? currentTemplate.leftStick.length > 0 :
+                currentTemplate.leftStick.buttons && currentTemplate.leftStick.buttons.length > 0);
+        const hasRightStick = currentTemplate.rightStick &&
+            (Array.isArray(currentTemplate.rightStick) ? currentTemplate.rightStick.length > 0 :
+                currentTemplate.rightStick.buttons && currentTemplate.rightStick.buttons.length > 0);
+
+        if (hasLeftStick)
+        {
+            pages.push({ name: 'Left Stick' });
+        }
+        if (hasRightStick)
+        {
+            pages.push({ name: 'Right Stick' });
+        }
+    }
+
+    // Show selector only if multiple pages
+    if (pages.length <= 1)
+    {
+        selectorEl.style.display = 'none';
+        return;
+    }
+
+    selectorEl.style.display = 'flex';
+
+    // Create button for each page
+    pages.forEach((page, index) =>
+    {
+        const btn = document.createElement('button');
+        btn.className = 'control-btn';
+        if (index === currentPageIndex)
+        {
+            btn.classList.add('active');
+        }
+        btn.dataset.pageIndex = index;
+        btn.title = `View ${page.name}`;
+
+        const icon = document.createElement('span');
+        icon.className = 'control-icon';
+        icon.textContent = '🕹️';
+        btn.appendChild(icon);
+
+        const text = document.createElement('span');
+        text.textContent = page.name;
+        btn.appendChild(text);
+
+        selectorEl.appendChild(btn);
+    });
+}
+
+function updatePageSelectorButtons()
+{
+    const selectorEl = document.getElementById('viewer-stick-selector');
+    if (!selectorEl) return;
+
+    const buttons = selectorEl.querySelectorAll('[data-page-index]');
+    buttons.forEach((btn, index) =>
+    {
+        btn.classList.toggle('active', index === currentPageIndex);
+    });
+}
+
+function loadPageImage()
+{
+    if (!currentTemplate) return;
+
+    let imageDataUrl = null;
+    let imageFlipped = false;
+
+    // New pages structure
+    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    {
+        const currentPage = currentTemplate.pages[currentPageIndex];
+
+        // Check if this page mirrors another page's image
+        if (currentPage.mirror_from_page_id)
+        {
+            const sourcePage = currentTemplate.pages.find(p => p.id === currentPage.mirror_from_page_id);
+            if (sourcePage && sourcePage.image_data_url)
+            {
+                imageDataUrl = sourcePage.image_data_url;
+                imageFlipped = true; // Mirrored pages should be flipped
+            }
+        }
+        else if (currentPage.image_data_url)
+        {
+            imageDataUrl = currentPage.image_data_url;
+        }
+    }
+    else
+    {
+        // Legacy structure
+        imageDataUrl = currentTemplate.imageDataUrl;
+        imageFlipped = (currentTemplate.imageFlipped === currentPageIndex);
+    }
+
+    if (!imageDataUrl)
+    {
+        console.warn('No image found for current page');
+        return;
+    }
+
     // Load the image
     const img = new Image();
     img.onload = () =>
     {
         // Store image reference for resize handling
         window.viewerImage = img;
+        window.viewerImageFlipped = imageFlipped;
 
         centerViewOnImage();
 
@@ -577,7 +736,7 @@ function displayTemplate()
         resizeViewerCanvas();
     };
 
-    img.src = currentTemplate.imageDataUrl;
+    img.src = imageDataUrl;
 }
 
 function resizeViewerCanvas()
@@ -614,11 +773,9 @@ function resizeViewerCanvas()
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
-    // Draw the image with flip based on current stick and imageFlipped setting
-    // imageFlipped indicates which stick's image is the flipped version
-    // So we flip when viewing that stick
+    // Draw the image with flip based on stored flip state
     ctx.save();
-    const shouldFlip = (currentStick === currentTemplate.imageFlipped);
+    const shouldFlip = window.viewerImageFlipped || false;
 
     if (shouldFlip)
     {
@@ -1074,7 +1231,8 @@ function searchBindings(buttonIdentifier)
                             actionMap: mapLabel,
                             isDefault: binding.is_default,
                             modifiers: modifiers,
-                            multiTap: binding.multi_tap
+                            multiTap: binding.multi_tap,
+                            activationMode: binding.activation_mode || null
                         });
                     }
                 }
@@ -1142,12 +1300,21 @@ function getCanvasCoords(event)
 
 function onCanvasMouseDown(event)
 {
-    // Middle click for panning
-    if (event.button === 1)
+    // Middle click (button 1) or right click (button 2) for panning
+    if (event.button === 1 || event.button === 2)
     {
         isPanning = true;
         lastPanPosition = { x: event.clientX, y: event.clientY };
         canvas.style.cursor = 'grabbing';
+        event.preventDefault();
+    }
+}
+
+function onCanvasContextMenu(event)
+{
+    // Prevent right-click context menu when over canvas
+    if (isPanning || event.button === 2)
+    {
         event.preventDefault();
     }
 }
@@ -1249,7 +1416,24 @@ function onCanvasClick(event)
     }
 
     canvas.style.cursor = isOverBox ? 'pointer' : 'default';
-} function showBindingInfo(buttonData, bindings)
+}
+
+function formatActivationModeLabel(mode)
+{
+    if (!mode)
+    {
+        return '';
+    }
+
+    const normalized = mode.replace(/^js\d+_/i, '').replace(/_/g, ' ');
+    return normalized
+        .split(' ')
+        .filter(Boolean)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function showBindingInfo(buttonData, bindings)
 {
     console.log('showBindingInfo called with:', buttonData.name, 'bindings:', bindings.length);
     selectedButton = { buttonData, bindings };
@@ -1305,10 +1489,15 @@ function onCanvasClick(event)
             actionText += ` <span class="multi-tap-badge">${binding.multiTap}x tap</span>`;
         }
 
+        const activationModeHtml = binding.activationMode
+            ? `<div class="binding-info-activation">Activation Mode: ${formatActivationModeLabel(binding.activationMode)}</div>`
+            : '';
+
         html += `
             <div class="binding-info-item">
                 <div class="binding-info-action">${actionText}</div>
                 <div class="binding-info-category">${binding.actionMap}</div>
+                ${activationModeHtml}
             </div>
         `;
     });
@@ -1387,7 +1576,7 @@ const ViewerState = {
     {
         this.save('viewerPan', pan);
         localStorage.setItem('viewerZoom', zoom.toString());
-        localStorage.setItem('viewerCurrentStick', currentStick);
+        localStorage.setItem('viewerCurrentPageIndex', currentPageIndex.toString());
         localStorage.setItem('hideDefaultBindings', hideDefaultBindings.toString());
         localStorage.setItem('modifierFilter', modifierFilter);
     }
@@ -1466,7 +1655,7 @@ async function exportToImage()
         const imgX = padding - drawBounds.minX;
         const imgY = padding - drawBounds.minY;
 
-        const shouldFlip = (currentStick === currentTemplate.imageFlipped);
+        const shouldFlip = window.viewerImageFlipped || false;
         if (shouldFlip)
         {
             exportCtx.save();

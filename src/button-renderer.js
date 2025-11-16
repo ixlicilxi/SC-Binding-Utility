@@ -8,13 +8,14 @@
 // Constants
 // ========================================
 
-export const ButtonFrameWidth = 140;
-export const ButtonFrameHeight = 60;
-export const HatFrameWidth = 110;
-export const HatFrameHeight = 50;
+export const ButtonFrameWidth = 220;
+export const ButtonFrameHeight = 120;
+export const HatFrameWidth = 140;
+export const HatFrameHeight = 100;
 export const HatButtonGap = 4;
-export const NumLines = 3;
+export const NumLines = 6;
 export const HatSpacing = 6;
+export const ActionTextSize = '14px';
 
 // ========================================
 // Drawing Helper Functions
@@ -247,7 +248,8 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     const lineHeight = compact ? 11 : 12;
     const titleFontSize = compact ? '11px' : '12px';
     const contentFontSize = compact ? '9px' : '10px';
-    const countFontSize = compact ? '8px' : '9px';
+    const actionFontSize = ActionTextSize;
+    const countFontSize = ActionTextSize;
     const titleSpacing = compact ? 14 : 18;
 
     // Helper function to truncate text to fit width
@@ -300,25 +302,45 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     const showMoreIndicator = contentLines.length > linesToShow;
 
     // Calculate starting Y position for content (vertically center the content area)
-    const actualLines = showMoreIndicator ? linesToShow - 1 : linesToShow;
-    const totalTextHeight = actualLines * lineHeight;
+    // Always reserve space for "+x more" indicator when at maximum display lines
+    // This keeps spacing consistent for all boxes at the maximum capacity, regardless of overflow
+    const isAtMaxCapacity = linesToShow === maxDisplayLines;
+    const actualLines = isAtMaxCapacity ? linesToShow - 1 : linesToShow;
+
+    // Calculate total height of all lines accounting for variable font sizes
+    let totalTextHeight = 0;
+    for (let i = 0; i < actualLines; i++)
+    {
+        const line = contentLines[i];
+        const isLeftAligned = line.startsWith('[action]') || line.startsWith('[muted]');
+        const fontSize = isLeftAligned ? actionFontSize : contentFontSize;
+        const fontSizeNum = parseInt(fontSize);
+        totalTextHeight += fontSizeNum + 3; // font size + 3px padding
+    }
+    // Subtract the last padding since there's no line after the last one
+    if (actualLines > 0)
+    {
+        totalTextHeight -= 3;
+    }
+
     const contentAreaStartY = y - (boxHeight / 2) + titleSpacing;
     const startY = contentAreaStartY + (contentHeight - totalTextHeight) / 2;
 
     // Render content lines
     for (let i = 0; i < actualLines; i++)
     {
-        const lineY = startY + (i * lineHeight);
         const line = contentLines[i];
 
         // Parse line for styling hints (e.g., "[subtle]text" or "[muted]text")
         let displayText = line;
         let color = contentColor;
+        let isLeftAligned = false;
 
         if (line.startsWith('[action]'))
         {
             displayText = line.substring(8);
             color = actionColor || contentColor;
+            isLeftAligned = true;
         } else if (line.startsWith('[subtle]'))
         {
             displayText = line.substring(8);
@@ -327,43 +349,70 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         {
             displayText = line.substring(7);
             color = mutedColor;
+            isLeftAligned = true;
         } else if (line.startsWith('[bright]'))
         {
             displayText = line.substring(8);
             color = contentColor;
         }
 
+        // Use ActionTextSize for action and muted text, contentFontSize for others
+        const fontSize = isLeftAligned ? actionFontSize : contentFontSize;
         ctx.fillStyle = color;
-        ctx.font = `${contentFontSize} "Segoe UI", sans-serif`;
-        ctx.textAlign = 'center';
+        ctx.font = `${fontSize} "Segoe UI", sans-serif`;
         ctx.textBaseline = 'middle';
 
-        const truncated = truncateText(displayText, ctx.font, contentWidth, true);
-        ctx.fillText(truncated, x, lineY);
+        // Calculate line height based on font size (extract numeric value and add padding)
+        const fontSizeNum = parseInt(fontSize);
+        const lineHeightForFont = fontSizeNum + 3; // Add 3px padding between lines
+
+        // Calculate Y position accounting for variable line heights
+        let lineY = startY;
+        for (let j = 0; j < i; j++)
+        {
+            const prevLine = contentLines[j];
+            let prevIsLeftAligned = prevLine.startsWith('[action]') || prevLine.startsWith('[muted]');
+            const prevFontSize = prevIsLeftAligned ? actionFontSize : contentFontSize;
+            const prevFontSizeNum = parseInt(prevFontSize);
+            lineY += prevFontSizeNum + 3;
+        }
+
+        // Left-align action labels and default bindings, center-align others
+        const xPos = isLeftAligned ? x - contentWidth / 2 + padding : x;
+        ctx.textAlign = isLeftAligned ? 'left' : 'center';
+
+        const truncated = truncateText(displayText, ctx.font, contentWidth - (isLeftAligned ? 0 : 0), true);
+        ctx.fillText(truncated, xPos, lineY);
     }
 
     // Show "more" indicator if needed
     if (showMoreIndicator)
     {
         const remainingCount = contentLines.length - actualLines;
-        const lineY = startY + (actualLines * lineHeight);
+
+        // Position at the bottom of the content area
+        const bottomPadding = 3;
+        const moreIndicatorY = y + (boxHeight / 2) - bottomPadding;
 
         ctx.fillStyle = '#aaa';
         ctx.font = `${countFontSize} "Segoe UI", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textBaseline = 'bottom';
 
         const countText = `+${remainingCount} more`;
         const countWidth = ctx.measureText(countText).width;
-        const bgPadding = 4;
+        const bgPadding = 3;
+        const bgHeight = parseInt(countFontSize) + 2;
 
-        // Draw background for count
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        roundRect(ctx, x - countWidth / 2 - bgPadding, lineY - lineHeight / 2, countWidth + bgPadding * 2, lineHeight, 2);
+        // Draw background for count - left-aligned
+        const bgX = x - contentWidth / 2 + padding;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+        roundRect(ctx, bgX - 1, moreIndicatorY - bgHeight, countWidth + bgPadding * 2, bgHeight, 2);
         ctx.fill();
 
+        // Draw text - left-aligned
         ctx.fillStyle = '#aaa';
-        ctx.fillText(countText, x, lineY);
+        ctx.textAlign = 'left';
+        ctx.fillText(countText, bgX + bgPadding, moreIndicatorY);
     }
 }
 

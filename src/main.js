@@ -515,7 +515,7 @@ window.addEventListener("DOMContentLoaded", async () =>
     await showAlert(`Warning: Failed to load AllBinds.xml: ${error}\n\nSome features may not work correctly.`, 'Warning');
   }
 
-  loadPersistedKeybindings();
+  await loadPersistedKeybindings();
 });
 
 function initializeTabSystem()
@@ -931,6 +931,18 @@ function initializeEventListeners()
   // New Keybinding button
   const newKeybindingBtn = document.getElementById('new-keybinding-btn');
   if (newKeybindingBtn) newKeybindingBtn.addEventListener('click', newKeybinding);
+
+  // Clear SC Binds button
+  const clearSCBindsBtn = document.getElementById('clear-sc-binds-btn');
+  if (clearSCBindsBtn) clearSCBindsBtn.addEventListener('click', openClearSCBindsModal);
+
+  // Clear SC Binds modal buttons
+  const clearBindsGenerateBtn = document.getElementById('clear-binds-generate-btn');
+  const copyUnbindCommandBtn = document.getElementById('copy-unbind-command-btn');
+  const removeUnbindFilesBtn = document.getElementById('remove-unbind-files-btn');
+  if (clearBindsGenerateBtn) clearBindsGenerateBtn.addEventListener('click', generateUnbindProfile);
+  if (copyUnbindCommandBtn) copyUnbindCommandBtn.addEventListener('click', copyUnbindCommand);
+  if (removeUnbindFilesBtn) removeUnbindFilesBtn.addEventListener('click', removeUnbindFiles);
 }
 
 async function loadKeybindingsFile()
@@ -957,11 +969,12 @@ async function loadKeybindingsFile()
     // Now get the merged bindings (AllBinds + user customizations)
     currentKeybindings = await invoke('get_merged_bindings');
 
-    // Save working copy to localStorage for cross-view access
-    localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
-
     // Persist file path so we know where to save
     localStorage.setItem('keybindingsFilePath', filePath);
+
+    // Cache only the user customizations (delta), not the full merged view
+    // This keeps the cache small and prevents stale data issues
+    await cacheUserCustomizations();
 
     // Reset unsaved changes flag
     hasUnsavedChanges = false;
@@ -983,10 +996,16 @@ async function loadPersistedKeybindings()
 {
   try
   {
-    // First, check if we have a working copy of bindings
-    const workingBindings = localStorage.getItem('workingBindings');
-    const cachedUnsavedState = localStorage.getItem('hasUnsavedChanges');
     const savedPath = localStorage.getItem('keybindingsFilePath');
+    const cachedUnsavedState = localStorage.getItem('hasUnsavedChanges');
+    const cachedDelta = localStorage.getItem('userCustomizationsDelta');
+
+    console.log('loadPersistedKeybindings - checking state:', {
+      hasSavedPath: !!savedPath,
+      cachedUnsavedState,
+      hasCachedDelta: !!cachedDelta,
+      cachedDeltaLength: cachedDelta?.length || 0
+    });
 
     // Set filename if we have a saved path
     if (savedPath)
@@ -995,61 +1014,107 @@ async function loadPersistedKeybindings()
       currentFilename = filename;
     }
 
-    if (workingBindings)
+    if (savedPath)
     {
-      // Use working copy as source of truth for display
-      console.log('Loading working copy of bindings');
-      currentKeybindings = JSON.parse(workingBindings);
-      hasUnsavedChanges = cachedUnsavedState === 'true';
-      updateUnsavedIndicator();
-
-      // CRITICAL: Also reload backend state to prevent data loss
-      // The backend needs to know about the user's file to properly merge with AllBinds
-      if (savedPath)
+      // Check if we have unsaved changes cached
+      // Note: cachedDelta might be the string "null", so check for that too
+      if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null')
       {
         try
         {
-          console.log('Reloading backend state from:', savedPath);
-          await invoke('load_keybindings', { filePath: savedPath });
-          console.log('Backend state reloaded successfully');
+          console.log('Restoring unsaved changes from cache...');
+
+          // Load the cached delta into backend state (this is the unsaved work)
+          const userCustomizations = JSON.parse(cachedDelta);
+          console.log('Parsed cached delta:', {
+            hasData: !!userCustomizations,
+            actionMapsCount: userCustomizations?.action_maps?.length || 0
+          });
+          await invoke('restore_user_customizations', { customizations: userCustomizations });
+
+          // Get fresh merged bindings (AllBinds + cached unsaved delta)
+          currentKeybindings = await invoke('get_merged_bindings');
+
+          // Restore unsaved changes state and update UI
+          hasUnsavedChanges = true;
+          localStorage.setItem('hasUnsavedChanges', 'true');
+
+          displayKeybindings();
+          updateFileIndicator(savedPath);
+          updateUnsavedIndicator();
+
+          console.log('Unsaved changes restored successfully');
+          return;
         } catch (error)
         {
-          console.error('Error reloading backend state:', error);
-          // Continue with cached data but warn user
-          console.warn('Backend state could not be reloaded, using cached data only');
+          console.error('Error restoring cached changes:', error);
+          // Fall through to load from file
         }
-        updateFileIndicator(savedPath);
       }
 
-      displayKeybindings();
-      return;
-    }
-
-    if (savedPath)
-    {
-      // Reload the user's keybindings file from disk
+      // No unsaved changes - load from file
       try
       {
+        console.log('Loading keybindings from file:', savedPath);
         await invoke('load_keybindings', { filePath: savedPath });
+
+        // Get fresh merged bindings (AllBinds + user delta)
         currentKeybindings = await invoke('get_merged_bindings');
 
-        // Save as working copy
-        localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
-        localStorage.setItem('hasUnsavedChanges', 'false');
+        // No unsaved changes
+        hasUnsavedChanges = false;
+        updateUnsavedIndicator();
 
         displayKeybindings();
         updateFileIndicator(savedPath);
+        return;
       } catch (error)
       {
         console.error('Error loading persisted file:', error);
-        // If loading fails, just show AllBinds without user customizations
-        await loadAllBindsOnly();
+        await showAlert(
+          `Could not load keybindings file:\n${savedPath}\n\nThe file may have been moved or deleted. Starting with default bindings.`,
+          'File Load Error'
+        );
+        // Clear the saved path and show defaults
+        localStorage.removeItem('keybindingsFilePath');
+        localStorage.removeItem('hasUnsavedChanges');
+        localStorage.removeItem('userCustomizationsDelta');
       }
-    } else
-    {
-      // No user file loaded, just show all available bindings from AllBinds
-      await loadAllBindsOnly();
     }
+
+    // No user file loaded - check if we have unsaved changes for a new keybinding set
+    if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null')
+    {
+      try
+      {
+        console.log('Restoring unsaved new keybinding set from cache...');
+
+        // Load the cached delta into backend state (this is the unsaved work)
+        const userCustomizations = JSON.parse(cachedDelta);
+        await invoke('restore_user_customizations', { customizations: userCustomizations });
+
+        // Get fresh merged bindings (AllBinds + cached unsaved delta)
+        currentKeybindings = await invoke('get_merged_bindings');
+
+        // Restore unsaved changes state
+        hasUnsavedChanges = true;
+        updateUnsavedIndicator();
+
+        displayKeybindings();
+        showUnsavedFileIndicator();
+
+        console.log('Unsaved new keybinding set restored successfully');
+        return;
+      } catch (error)
+      {
+        console.error('Error restoring cached new keybinding set:', error);
+        // Fall through to show AllBinds only
+      }
+    }
+
+    // No user file loaded, just show all available bindings from AllBinds
+    await loadAllBindsOnly();
+
   } catch (error)
   {
     console.error('Error loading persisted keybindings:', error);
@@ -1063,8 +1128,8 @@ async function loadAllBindsOnly()
     // Get merged bindings with no user customizations
     currentKeybindings = await invoke('get_merged_bindings');
 
-    // Save as working copy
-    localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
+    // No need to cache - AllBinds is always available and this is the default state
+    hasUnsavedChanges = false;
     localStorage.setItem('hasUnsavedChanges', 'false');
 
     displayKeybindings();
@@ -1072,6 +1137,32 @@ async function loadAllBindsOnly()
   {
     console.error('Error loading AllBinds:', error);
     // Show welcome screen if AllBinds failed to load
+  }
+}
+
+/**
+ * Cache only the user's customizations (delta) to localStorage.
+ * This is much smaller than caching the full merged view and prevents stale data issues.
+ */
+async function cacheUserCustomizations()
+{
+  try
+  {
+    // Get the user's customizations from backend (just the delta, not merged with AllBinds)
+    const userCustomizations = await invoke('get_user_customizations');
+
+    // Cache the delta - this is typically < 100 KB vs 25+ MB for full merged view
+    localStorage.setItem('userCustomizationsDelta', JSON.stringify(userCustomizations));
+
+    console.log('Cached user customizations delta:', {
+      hasData: !!userCustomizations,
+      actionMapsCount: userCustomizations?.action_maps?.length || 0,
+      profileName: userCustomizations?.profile_name
+    });
+  } catch (error)
+  {
+    console.error('Failed to cache user customizations:', error);
+    // Non-critical error - we can always reload from file
   }
 }
 
@@ -1100,10 +1191,9 @@ async function newKeybinding()
     // Get fresh merged bindings (AllBinds only, no customizations)
     currentKeybindings = await invoke('get_merged_bindings');
 
-    // Save as working copy
-    localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
-    localStorage.setItem('hasUnsavedChanges', 'false');
+    // Clear persisted state - we're starting fresh
     localStorage.removeItem('keybindingsFilePath');
+    localStorage.setItem('hasUnsavedChanges', 'false');
 
     // Clear the current filename since we're creating new bindings
     currentFilename = null;
@@ -1554,18 +1644,45 @@ function renderDeviceInfo()
 // Helper function to check if an action has any bindings that will be displayed
 function actionHasVisibleBindings(action)
 {
-  if (!action.bindings || action.bindings.length === 0) return false;
+  if (!action.bindings || action.bindings.length === 0) return true; // Show actions with no bindings (they're unbound)
+
+  // Check if ALL bindings are empty/space-only defaults
+  const allBindingsAreEmptyDefaults = action.bindings.every(binding =>
+  {
+    // Check the pattern BEFORE trimming to catch 'kb1_ ', 'js1_ ', etc.
+    const isEmptyBinding = !!binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
+    return binding.is_default && isEmptyBinding;
+  });
+
+  // Always show actions that have only empty defaults (unbound by default actions)
+  // These are actions users might want to bind themselves
+  // BUT respect the input type filter
+  if (allBindingsAreEmptyDefaults)
+  {
+    // If filtering by input type, check if there's at least one empty binding of that type
+    if (currentFilter !== 'all')
+    {
+      return action.bindings.some(binding =>
+      {
+        if (currentFilter === 'keyboard') return binding.input_type === 'Keyboard';
+        if (currentFilter === 'mouse') return binding.input_type === 'Mouse';
+        if (currentFilter === 'joystick') return binding.input_type === 'Joystick';
+        if (currentFilter === 'gamepad') return binding.input_type === 'Gamepad';
+        return false;
+      });
+    }
+    return true;
+  }
 
   return action.bindings.some(binding =>
   {
     const trimmedInput = binding.input.trim();
 
-    // Check if this is a cleared binding
-    const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !binding.is_default;
+    // Check if this is a cleared binding (check BEFORE trimming for the pattern)
+    const isClearedBinding = !!binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
 
     // Skip truly unbound bindings, but keep cleared bindings that override defaults
     if (!trimmedInput || trimmedInput === '') return false;
-    if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return false;
 
     // Filter out default bindings if showDefaultBindings is false
     if (!showDefaultBindings && binding.is_default && !isClearedBinding) return false;
@@ -1745,22 +1862,33 @@ function renderKeybindings()
           <div class="bindings-container">
       `;
 
-      if (!action.bindings || action.bindings.length === 0 || action.bindings.every(b => !b.input || b.input.trim() === '' || (b.input.trim().match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !b.is_default)))
+      // Check if this action only has the special "unbound" placeholder binding
+      const hasOnlyUnboundPlaceholder = action.bindings && action.bindings.length === 1 &&
+        action.bindings[0].input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+        action.bindings[0].is_default &&
+        action.bindings[0].display_name === 'Unbound';
+
+      if (!action.bindings || action.bindings.length === 0 || hasOnlyUnboundPlaceholder)
       {
-        html += `<span class="binding-tag unbound">Unbound</span>`;
+        // Show nothing - the action will just appear without any binding tags
+        html += `<span class="binding-tag unbound" style="visibility: hidden;">Unbound</span>`;
       } else
       {
         action.bindings.forEach(binding =>
         {
           const trimmedInput = binding.input.trim();
 
-          // Check if this is a cleared binding (overriding a default with blank)
-          // Matches: js1_ , kb1_ , mouse1_ , gp1_ , etc. (with optional trailing space)
-          const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && !binding.is_default;
+          // Skip the unbound placeholder binding if it exists alongside real bindings
+          const isUnboundPlaceholder = binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+            binding.is_default &&
+            binding.display_name === 'Unbound';
+          if (isUnboundPlaceholder) return;
 
-          // Skip truly unbound bindings, but keep cleared bindings that override defaults
+          // Check if this is a cleared binding (overriding a default with blank)
+          const isClearedBinding = !!trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default;
+
+          // Skip truly unbound bindings
           if (!trimmedInput || trimmedInput === '') return;
-          if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return;
 
           // Filter out default bindings if showDefaultBindings is false
           if (!showDefaultBindings && binding.is_default && !isClearedBinding) return;
@@ -1777,26 +1905,31 @@ function renderKeybindings()
           let typeClass = 'unbound';
           let icon = '○';
 
-          if (binding.input_type === 'Keyboard')
+          // Only assign a type class if there's an actual input type
+          // Don't categorize truly unbound bindings
+          if (binding.input_type && binding.input_type !== 'Unbound')
           {
-            typeClass = 'keyboard';
-            icon = '⌨';
-          } else if (binding.input_type === 'Mouse')
-          {
-            typeClass = 'mouse';
-            icon = '🖱';
-          } else if (binding.input_type === 'Joystick')
-          {
-            typeClass = 'joystick';
-            icon = '🕹';
-          } else if (binding.input_type === 'Gamepad')
-          {
-            typeClass = 'gamepad';
-            icon = '🎮';
+            if (binding.input_type === 'Keyboard')
+            {
+              typeClass = 'keyboard';
+              icon = '⌨';
+            } else if (binding.input_type === 'Mouse')
+            {
+              typeClass = 'mouse';
+              icon = '🖱';
+            } else if (binding.input_type === 'Joystick')
+            {
+              typeClass = 'joystick';
+              icon = '🕹';
+            } else if (binding.input_type === 'Gamepad')
+            {
+              typeClass = 'gamepad';
+              icon = '🎮';
+            }
           }
 
           // Show if it's a default binding or a cleared override
-          const defaultIndicator = binding.is_default ? ' (default)' : '';
+          const defaultIndicator = !isClearedBinding && binding.is_default ? ' (default)' : '';
 
           // Show multi-tap indicator if present
           const multiTapIndicator = binding.multi_tap ? ` <span class="multi-tap-indicator" title="Double-tap binding">(${binding.multi_tap}x tap)</span>` : '';
@@ -1804,15 +1937,8 @@ function renderKeybindings()
           // Format display name with activation mode appended
           let displayText = binding.display_name;
 
-          // Debug: log the binding object to see what we have
-          if (binding.activation_mode)
-          {
-            console.log('Binding with activation_mode:', binding);
-          }
-
           if (binding.activation_mode && !isClearedBinding)
           {
-            // Format activation mode for display (e.g., "delayed_press" -> "Delayed Press")
             const formattedMode = binding.activation_mode
               .split('_')
               .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -1820,15 +1946,25 @@ function renderKeybindings()
             displayText += ` - ${formattedMode}`;
           }
 
-          html += `
-            <span class="binding-tag ${typeClass} ${binding.is_default ? 'default-binding' : ''} ${isClearedBinding ? 'cleared-binding' : ''}">
-              <span class="binding-icon">${icon}</span>
-              ${isClearedBinding ? 'Cleared Override' : displayText}${defaultIndicator}${multiTapIndicator}
+          // For cleared bindings, show the original default binding with strikethrough
+          // display_name already contains the formatted original binding text for cleared bindings
+          const clearedDisplayText = isClearedBinding ? binding.display_name : displayText;
+
+          // Only show remove button for non-unbound bindings
+          const removeButton = typeClass !== 'unbound' ? `
               <button class="binding-remove-btn" 
                       title="Clear this binding"
                       data-action-map="${actionMap.name}"
                       data-action-name="${action.name}"
-                      data-input="${binding.input.replace(/"/g, '&quot;')}">×</button>
+                      data-input="${binding.input.replace(/"/g, '&quot;')}">×</button>` : '';
+
+          html += `
+            <span class="binding-tag ${typeClass} ${binding.is_default ? 'default-binding' : ''} ${isClearedBinding ? 'cleared-binding' : ''}">
+              <span class="binding-icon">${icon}</span>
+              <span class="binding-label ${isClearedBinding ? 'cleared-text' : ''}">
+                ${isClearedBinding ? `<span class="cleared-default-text">${clearedDisplayText}</span>` : displayText}
+              </span>
+              ${defaultIndicator}${multiTapIndicator}${removeButton}
             </span>
           `;
         });
@@ -2693,9 +2829,10 @@ async function refreshBindings()
     // Update working copy with latest changes
     if (currentKeybindings)
     {
-      localStorage.setItem('workingBindings', JSON.stringify(currentKeybindings));
+      // Cache only the user customizations (delta), not the full merged view
+      await cacheUserCustomizations();
       localStorage.setItem('hasUnsavedChanges', hasUnsavedChanges.toString());
-      console.log('Updated workingBindings in localStorage');
+      console.log('Updated user customizations delta in localStorage');
     }
 
     renderKeybindings();
@@ -2933,8 +3070,8 @@ function updateUnsavedIndicator()
   {
     if (hasUnsavedChanges)
     {
-      indicator.style.borderColor = 'var(--accent-primary)';
-      indicator.style.backgroundColor = 'rgba(217, 83, 79, 0.1)';
+      indicator.style.borderColor = 'var(--accent-warning)';
+      indicator.style.backgroundColor = 'rgba(206, 145, 120, 0.1)';
       if (!fileNameEl.textContent.includes('*'))
       {
         fileNameEl.textContent += ' *';
@@ -2942,8 +3079,8 @@ function updateUnsavedIndicator()
     }
     else
     {
-      indicator.style.borderColor = 'var(--button-border)';
-      indicator.style.backgroundColor = 'var(--bg-medium)';
+      indicator.style.removeProperty('border-color');
+      indicator.style.removeProperty('background-color');
       fileNameEl.textContent = fileNameEl.textContent.replace(' *', '');
     }
   }
@@ -3817,9 +3954,15 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
   // Render bindings list
   let html = '';
 
-  if (!action.bindings || action.bindings.length === 0)
+  // Check if this action only has the special "unbound" placeholder
+  const hasOnlyUnboundPlaceholder = action.bindings && action.bindings.length === 1 &&
+    action.bindings[0].input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+    action.bindings[0].is_default &&
+    action.bindings[0].display_name === 'Unbound';
+
+  if (!action.bindings || action.bindings.length === 0 || hasOnlyUnboundPlaceholder)
   {
-    html = '<div class="empty-state" style="padding: 2rem; text-align: center; color: var(--text-secondary);">No bindings yet. Click "Add New Binding" to create one.</div>';
+    html = '<div class="empty-state" style="padding: 2rem; text-align: center; color: var(--text-secondary);">No bindings for this action. Click "Add New Binding" to create one.</div>';
   }
   else
   {
@@ -3830,8 +3973,8 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
       // Skip truly empty bindings
       if (!trimmedInput || trimmedInput === '') return;
 
-      // Skip cleared override placeholders
-      if (trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default) return;
+      // Check if this is a cleared binding (e.g., "js1_ ", "kb1_ ", etc.)
+      const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
 
       let icon = '○';
       if (binding.input_type === 'Keyboard') icon = '⌨️';
@@ -3841,17 +3984,22 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
 
       const defaultBadge = binding.is_default ? '<span class="action-binding-default-badge">Default</span>' : '';
       const customBadge = !binding.is_default ? '<span class="action-binding-custom-badge">Custom</span>' : '';
+      const clearedBadge = isClearedBinding ? '<span class="action-binding-cleared-badge">Cleared</span>' : '';
       const activationValue = binding.activation_mode || '';
 
+      // Disable remove button for unbound bindings
+      const isUnbound = binding.input_type === 'Unknown';
+      const removeButtonDisabled = isUnbound ? 'disabled' : '';
+
       html += `
-        <div class="action-binding-item ${binding.is_default ? 'is-default' : ''}" data-binding-index="${index}">
+        <div class="action-binding-item ${binding.is_default ? 'is-default' : ''} ${isClearedBinding ? 'is-cleared' : ''}" data-binding-index="${index}">
           <div class="action-binding-icon">${icon}</div>
           <div class="action-binding-device">
-            ${binding.input_type}${defaultBadge}${customBadge}
+            ${binding.input_type}${defaultBadge}${customBadge}${clearedBadge}
           </div>
-          <div class="action-binding-input">${binding.display_name}</div>
+          <div class="action-binding-input ${isClearedBinding ? 'cleared-text' : ''}">${isClearedBinding && binding.original_default ? `<span style="text-decoration: line-through;">${binding.original_default}</span>` : binding.display_name}</div>
           <div class="action-binding-activation">
-            <select class="binding-activation-select" data-binding-index="${index}">
+            <select class="binding-activation-select" data-binding-index="${index}" ${isClearedBinding ? 'disabled' : ''}>
               <option value="">Default (Press)</option>
               <option value="press" ${activationValue === 'press' ? 'selected' : ''}>Press</option>
               <option value="press_quicker" ${activationValue === 'press_quicker' ? 'selected' : ''}>Press (Quicker)</option>
@@ -3872,7 +4020,7 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
             </select>
           </div>
           <div class="action-binding-remove">
-            <button onclick="removeBindingFromModal(${index})">×</button>
+            <button onclick="removeBindingFromModal(${index})" ${removeButtonDisabled}>×</button>
           </div>
         </div>
       `;
@@ -4002,3 +4150,168 @@ function addNewBindingFromModal()
 // Make it globally available
 window.openActionBindingsModal = openActionBindingsModal;
 window.removeBindingFromModal = removeBindingFromModal;
+
+// ============================================================================
+// CLEAR SC BINDS FUNCTIONS
+// ============================================================================
+
+function openClearSCBindsModal()
+{
+  const modal = document.getElementById('clear-sc-binds-modal');
+  modal.style.display = 'flex';
+}
+
+function closeClearSCBindsModal()
+{
+  const modal = document.getElementById('clear-sc-binds-modal');
+  modal.style.display = 'none';
+}
+
+function closeClearSCBindsSuccessModal()
+{
+  const modal = document.getElementById('clear-sc-binds-success-modal');
+  modal.style.display = 'none';
+}
+
+async function generateUnbindProfile()
+{
+  const statusDiv = document.getElementById('clear-binds-status');
+
+  try
+  {
+    // Get selected devices
+    const devices = {
+      keyboard: document.getElementById('unbind-keyboard').checked,
+      mouse: document.getElementById('unbind-mouse').checked,
+      gamepad: document.getElementById('unbind-gamepad').checked,
+      joystick1: document.getElementById('unbind-joystick1').checked,
+      joystick2: document.getElementById('unbind-joystick2').checked,
+    };
+
+    // Check if at least one device is selected
+    if (!Object.values(devices).some(v => v))
+    {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color = 'var(--accent-primary)';
+      statusDiv.textContent = '⚠️ Please select at least one device to unbind.';
+      return;
+    }
+
+    // Get the SC installation path from localStorage
+    const scInstallPath = localStorage.getItem('scInstallDirectory');
+    if (!scInstallPath)
+    {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color = 'var(--accent-warning)';
+      statusDiv.textContent = '⚠️ No SC installation directory configured. Configure it in Auto Save Settings first.';
+      return;
+    }
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.color = 'var(--text-secondary)';
+    statusDiv.textContent = '⏳ Generating unbind profile...';
+
+    console.log('Generating unbind profile with base path:', scInstallPath);
+
+    // Call backend to generate the unbind profile
+    const result = await invoke('generate_unbind_profile', {
+      devices,
+      basePath: scInstallPath
+    });
+
+    console.log('Unbind profile generation result:', result);
+
+    // Close the main modal
+    closeClearSCBindsModal();
+
+    // Show success modal with results
+    const successModal = document.getElementById('clear-sc-binds-success-modal');
+    const locationsDiv = document.getElementById('unbind-save-locations');
+
+    if (result.saved_locations && result.saved_locations.length > 0)
+    {
+      let html = '<p><strong>📁 Saved to:</strong></p><ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">';
+      result.saved_locations.forEach(loc =>
+      {
+        html += `<li><code>${loc}</code></li>`;
+      });
+      html += '</ul>';
+      locationsDiv.innerHTML = html;
+    }
+    else
+    {
+      locationsDiv.innerHTML = '<p class="info-text">⚠️ No SC installation directories found. File created in current directory.</p>';
+    }
+
+    successModal.style.display = 'flex';
+
+  } catch (error)
+  {
+    console.error('Error generating unbind profile:', error);
+    statusDiv.style.display = 'block';
+    statusDiv.style.color = 'var(--accent-primary)';
+    statusDiv.textContent = `❌ Error: ${error}`;
+  }
+}
+
+async function copyUnbindCommand()
+{
+  const command = 'pp_RebindKeys UNBIND_ALL';
+
+  try
+  {
+    await navigator.clipboard.writeText(command);
+
+    // Visual feedback
+    const btn = document.getElementById('copy-unbind-command-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '✅ Copied!';
+    btn.disabled = true;
+
+    setTimeout(() =>
+    {
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }, 2000);
+  } catch (error)
+  {
+    console.error('Failed to copy command:', error);
+    await showAlert('Failed to copy command to clipboard', 'Error');
+  }
+}
+
+async function removeUnbindFiles()
+{
+  const confirmed = await showConfirmation(
+    'Are you sure you want to remove the UNBIND_ALL.xml files from all SC installation directories?',
+    'Remove Unbind Files'
+  );
+
+  if (!confirmed) return;
+
+  try
+  {
+    const result = await invoke('remove_unbind_profile');
+
+    if (result.removed_count > 0)
+    {
+      await showAlert(
+        `Successfully removed ${result.removed_count} unbind profile file(s).`,
+        'Files Removed'
+      );
+      closeClearSCBindsSuccessModal();
+    }
+    else
+    {
+      await showAlert('No unbind profile files found to remove.', 'Info');
+    }
+  } catch (error)
+  {
+    console.error('Error removing unbind files:', error);
+    await showAlert(`Error removing files: ${error}`, 'Error');
+  }
+}
+
+// Make functions globally available
+window.closeClearSCBindsModal = closeClearSCBindsModal;
+window.closeClearSCBindsSuccessModal = closeClearSCBindsSuccessModal;

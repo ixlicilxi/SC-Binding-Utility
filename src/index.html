@@ -170,8 +170,10 @@
               <h3>Actions</h3>
               <button id="new-keybinding-btn" class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem;">📝
                 New Keybinding</button>
-              <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Set Joystick
+              <button id="configure-joystick-mapping-btn" class="btn btn-secondary"
+                style="width: 100%; margin-bottom: 0.75rem;">⚙️ Set Joystick
                 Remapping</button>
+              <button id="clear-sc-binds-btn" class="btn btn-danger" style="width: 100%;">🗑️ Clear SC Binds</button>
             </div>
 
             <div class=" filter-section">
@@ -358,32 +360,12 @@
             </div>
 
             <div class="section">
-              <h3>Image</h3>
-              <label>
-                Image Mode:
-                <select id="image-type-select">
-                  <option value="single">Single Image (Both Sticks)</option>
-                  <option value="dual">Separate Images (Left & Right)</option>
-                </select>
-              </label>
-              <button id="load-image-btn" class="btn btn-secondary btn-block">Load Joystick Image</button>
-              <div id="image-info" class="info-text"></div>
-            </div>
-
-            <div class="section">
-              <h3>Image Mirror</h3>
-              <label>
-                Mirror Settings:
-                <select id="image-flip-select">
-                  <option value="none">No Mirror</option>
-                  <option value="left">Mirror Left Stick</option>
-                  <option value="right">Mirror Right Stick</option>
-                </select>
-              </label>
-              <div class="info-text">
-                If you have one image, select which stick to mirror. Select "No Mirror" if you have two
-                different images.
+              <h3>Template Pages</h3>
+              <div id="template-pages-empty" class="empty-state-small">
+                No pages yet. Add a page for each physical stick, throttle, or pedal you want to document.
               </div>
+              <div id="template-pages-list" class="template-pages-list"></div>
+              <button id="add-template-page-btn" class="btn btn-secondary btn-block">+ Add Page</button>
             </div>
 
             <div class="section">
@@ -434,9 +416,12 @@
               <!-- Floating Template Controls Panel -->
               <div class="template-controls-panel">
                 <div class="control-group">
-                  <div class="stick-selector">
-                    <button id="left-stick-btn" class="control-btn">🕹️ Left</button>
-                    <button id="right-stick-btn" class="control-btn active">🕹️ Right</button>
+                  <div class="page-selector">
+                    <label for="toolbar-page-select"
+                      style="font-size: 11px; color: #aaa; margin-right: 4px;">Page:</label>
+                    <select id="toolbar-page-select" class="control-select" title="Select page to edit">
+                      <option value="">No pages</option>
+                    </select>
                   </div>
                 </div>
                 <div class="control-divider"></div>
@@ -680,6 +665,16 @@
             <ul>
               <li><strong>Buttons not working in-game?</strong> Check your joystick mapping. The js numbers in your
                 bindings file must match how Star Citizen sees your devices.</li>
+              <li><strong>Bindings not working in-game?</strong> Make sure there isn't a similar binding with different
+                wording already set. Star Citizen includes many legacy actions that may no longer function—check for
+                duplicate bindings with slightly different names.</li>
+              <li><strong>Button still active after unbinding?</strong> If you bind a button to an action and then
+                unbind it,
+                the button may still be bound in-game. You can either manually unbind that specific button in the game's
+                control
+                settings, or clear all bindings for that device: Advanced Control Customization → Control Profiles →
+                Clear All
+                Device Bindings.</li>
               <li><strong>Wrong device responding?</strong> Reconfigure joystick mapping and make sure to test each
                 device.</li>
               <li><strong>Lost your mapping?</strong> The app stores device mapping in localStorage, but you can always
@@ -1016,6 +1011,160 @@
     </div>
   </div>
 
+  <!-- Template Page Modal -->
+  <div id="template-page-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h2 id="template-page-modal-title">Add Page</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Basic Info Section -->
+        <div class="modal-section">
+          <h3 class="section-title">Basic Information</h3>
+          <label>
+            Page Name:
+            <input type="text" id="template-page-name" placeholder="e.g., Left Stick" />
+          </label>
+        </div>
+
+        <!-- Device Section -->
+        <div class="modal-section">
+          <h3 class="section-title">Device Configuration</h3>
+          <label>
+            Device:
+            <div class="device-detection-box">
+              <div id="detected-device-info" class="detected-device-info">
+                <span class="device-icon">🎮</span>
+                <div class="device-info-text">
+                  <span id="detected-device-name" class="device-name">No device detected</span>
+                  <span id="detected-device-uuid" class="device-uuid" style="display: none;"></span>
+                </div>
+              </div>
+              <div style="margin-top: 0.75rem;">
+                <label style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 0.25rem; display: block;">
+                  Select Device:
+                </label>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                  <select id="page-device-select" style="flex: 1;"></select>
+                  <button id="refresh-devices-btn" class="btn btn-secondary btn-sm"
+                    title="Refresh device list">🔄</button>
+                </div>
+                <div class="info-text" style="margin-bottom: 0.75rem; font-size: 0.85em;">
+                  Choose a device from the list, or use the button below to detect it automatically.
+                </div>
+              </div>
+              <button id="detect-device-btn" class="btn btn-primary">🎯 Press Button on Device</button>
+              <div id="device-detection-status" class="info-text" style="margin-top: 0.5rem;">
+                Press any button on your joystick or gamepad to identify it.
+              </div>
+            </div>
+          </label>
+
+          <label>
+            Axis Mapping Profile:
+            <select id="template-page-axis-profile"></select>
+          </label>
+          <div class="info-text" id="template-page-axis-summary"></div>
+
+          <div class="custom-axis-actions">
+            <button id="open-custom-axis-modal" class="btn btn-secondary btn-sm">Configure Custom Mapping</button>
+            <span class="info-text">Use this if your device isn't listed or needs a unique mapping.</span>
+          </div>
+        </div>
+
+        <!-- Image Section -->
+        <div class="modal-section">
+          <h3 class="section-title">Image Configuration</h3>
+          <label>
+            Page Image:
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button id="page-load-image-btn" class="btn btn-secondary" style="flex: 1;">📷 Load Image</button>
+              <button id="page-clear-image-btn" class="btn btn-danger btn-sm" style="display: none;">✕</button>
+            </div>
+            <div id="page-image-info" class="info-text" style="margin-top: 0.5rem;"></div>
+          </label>
+
+          <label>
+            Mirror From Page:
+            <select id="page-mirror-select">
+              <option value="">No Mirror (Use Own Image)</option>
+            </select>
+          </label>
+          <div class="info-text">
+            Select another page to mirror its image horizontally, or use this page's own image.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="template-page-delete-btn" class="btn btn-danger" style="margin-right: auto; display: none;">Delete
+          Page</button>
+        <button id="template-page-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="template-page-save-btn" class="btn btn-success">Save Page</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mirror Template Modal -->
+  <div id="mirror-template-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2>Mirror Button Positions</h2>
+      </div>
+      <div class="modal-body">
+        <div class="info-text" style="margin-bottom: 1rem;">
+          Copy button positions from one page to another, mirrored horizontally across the image.
+        </div>
+
+        <label>
+          Source Page (Copy From):
+          <select id="mirror-source-page-select">
+            <option value="">-- Select a page --</option>
+          </select>
+        </label>
+
+        <label>
+          Destination Page (Copy To):
+          <select id="mirror-dest-page-select">
+            <option value="">-- Select a page --</option>
+          </select>
+        </label>
+
+        <div class="info-text"
+          style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 4px;">
+          ℹ️ Button positions will be copied and flipped horizontally. The destination page's buttons will be replaced.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="mirror-template-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="mirror-template-confirm-btn" class="btn btn-success">Mirror Buttons</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Axis Mapping Modal -->
+  <div id="custom-axis-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 700px;">
+      <div class="modal-header">
+        <h2>Custom Axis Mapping</h2>
+      </div>
+      <div class="modal-body">
+        <div class="axis-detection-controls" style="margin-bottom: 1rem;">
+          <button id="start-axis-detection-btn" class="btn btn-primary">🎯 Start Detection</button>
+          <button id="stop-axis-detection-btn" class="btn btn-secondary" style="display: none;">⏹️ Stop</button>
+          <div id="axis-detection-status" class="info-text" style="margin-top: 0.5rem;">
+            Click "Start Detection" then move an axis on your device to detect it.
+          </div>
+        </div>
+        <div class="custom-axis-table" id="custom-axis-table"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="custom-axis-reset-btn" class="btn btn-secondary">Reset</button>
+        <button id="custom-axis-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="custom-axis-save-btn" class="btn btn-success">Save Mapping</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Custom Confirmation Modal -->
   <div id="confirmation-modal" class="modal" style="display: none;">
     <div class="modal-content confirmation-modal-content">
@@ -1069,37 +1218,25 @@
         <div class="whats-new-section">
           <h3>✨ New Features</h3>
           <ul>
-            <li><strong>Device Mapping Persistence:</strong> Joystick and gamepad mappings are now saved between
-              sessions for the template editor.</li>
-            <li><strong>Update Checker:</strong> The app now checks for updates and notifies you when a new version is
-              available.</li>
-            <li><strong>Clear Cache:</strong> You can now reset the application cache to clear unsaved data and local
-              storage in case of issues.</li>
-            <li><strong>Button Action Types:</strong> Button types have been added and can be set for each binding.
-              Hold, quick
-              tap, double tap, etc.</li>
+            <li><strong>Template Editor V2: </strong>A total refactor of the templating system - can now support
+              variable numbers of pages, and manual axis definition with presets (more presets will be added later,
+              initial presets may be innacurate - so verify your axes!).
+            </li>
           </ul>
         </div>
         <div class="whats-new-section">
           <h3>🔧 Improvements</h3>
           <ul>
-            <li><strong>Better Input Detection:</strong> Improved accuracy and reliability when detecting inputs.</li>
-            <li><strong>Improved UI/UX for Keybindings Page: </strong> Now clearer controls, layout, and detection
-              modal.</li>
-            <li><strong>UI Updates For Template Editor:</strong> Now clearer controls, layout, and detection modal.
-            </li>
-            <li><strong>Updated Dual VKB Profile:</strong> added axes (note the profile is a separate download on the
-              github repo).</li>
-            <li><strong>App-Wide Font Size Scaling:</strong> Use Ctrl+Plus to increase, Ctrl+Minus to decrease, and
-              Ctrl+0 to reset font size (like VS Code!).</li>
-            <li><strong>Manage Bindings Button:</strong> Dedicated button to view and manage all bindings for an action
-              without conflicts.</li>
+            <li><strong>Template Editor: </strong>Experimenting with page image size normalization for better
+              consistency.</li>
+            <li><strong>Visual view: </strong>now has better button/text rendering.</li>
           </ul>
         </div>
         <div class="whats-new-section">
           <h3>🐛 Bug Fixes</h3>
           <ul>
             <li>Visual view axes no longer map to button types.</li>
+            <li>Potential fix for unbound actions.</li>
           </ul>
         </div>
         <div class="whats-new-footer">
@@ -1122,6 +1259,92 @@
       title="Click to copy log file path">Logs</span>
   </div>
   <img id="hidden-back" src="/src/icons/update_avail.png" hidden>
+
+  <!-- Clear SC Binds Modal -->
+  <div id="clear-sc-binds-modal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>🗑️ Clear Star Citizen Bindings</h2>
+      </div>
+      <div class="modal-body">
+        <div class="warning-box" style="margin-bottom: 1.5rem;">
+          <p><strong>⚠️ Warning:</strong> This will create a special unbinding profile that <strong>forcefully unbinds
+              ALL selected device inputs</strong> in Star Citizen.</p>
+          <p>Use this when you want to start with a completely clean slate in-game.</p>
+        </div>
+
+        <h3 style="margin-bottom: 1rem;">Select devices to unbind:</h3>
+        <div style="margin-bottom: 1.5rem;">
+          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="unbind-keyboard" checked />
+            <label for="unbind-keyboard">Keyboard</label>
+          </div>
+          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="unbind-mouse" checked />
+            <label for="unbind-mouse">Mouse</label>
+          </div>
+          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="unbind-gamepad" checked />
+            <label for="unbind-gamepad">Gamepad</label>
+          </div>
+          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="unbind-joystick1" checked />
+            <label for="unbind-joystick1">Joystick 1</label>
+          </div>
+          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="unbind-joystick2" checked />
+            <label for="unbind-joystick2">Joystick 2</label>
+          </div>
+        </div>
+
+        <div id="clear-binds-status" style="margin-top: 1rem; display: none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="clear-binds-cancel-btn" class="btn btn-secondary" onclick="closeClearSCBindsModal()">Cancel</button>
+        <button id="clear-binds-generate-btn" class="btn btn-danger">Generate Unbind Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear SC Binds Success Modal -->
+  <div id="clear-sc-binds-success-modal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+      <div class="modal-header">
+        <h2>✅ Unbind Profile Created</h2>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom: 1rem;">The <code>UNBIND_ALL.xml</code> profile has been created successfully!</p>
+
+        <div id="unbind-save-locations" style="margin-bottom: 1.5rem;"></div>
+
+        <div style="background: var(--bg-light); padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+          <h3 style="margin-bottom: 0.5rem;">📋 Console Command:</h3>
+          <p style="margin-bottom: 0.5rem;">Load this profile in Star Citizen with:</p>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <code id="unbind-console-command"
+              style="flex: 1; padding: 0.5rem; background: var(--bg-dark); border-radius: 4px;">pp_RebindKeys UNBIND_ALL</code>
+            <button id="copy-unbind-command-btn" class="btn btn-primary" title="Copy to clipboard">📋 Copy</button>
+          </div>
+        </div>
+
+        <div class="info-box" style="margin-bottom: 1rem;">
+          <p><strong>Instructions:</strong></p>
+          <ol style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+            <li>Launch Star Citizen</li>
+            <li>Press <code>~</code> to open the console</li>
+            <li>Paste the command above</li>
+            <li>All selected device bindings will be cleared</li>
+            <li>Load your custom bindings profile after</li>
+          </ol>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="remove-unbind-files-btn" class="btn btn-danger">Remove Unbind Files</button>
+        <button class="btn btn-primary" onclick="closeClearSCBindsSuccessModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 
 </html>

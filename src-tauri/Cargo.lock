@@ -3350,6 +3350,7 @@ dependencies = [
  "env_logger",
  "gilrs",
  "log",
+ "once_cell",
  "quick-xml 0.36.2",
  "rusty-xinput",
  "serde",

@@ -1,12 +1,15 @@
+use log::{error, info};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
-use log::{info, error};
 use tauri_plugin_opener::OpenerExt;
 
-mod keybindings;
+mod device_database;
+mod device_profiles;
 mod directinput;
+mod keybindings;
 
-use keybindings::{ActionMaps, OrganizedKeybindings, AllBinds, MergedBindings, ActionMap, Action};
+use keybindings::{Action, ActionMap, ActionMaps, AllBinds, MergedBindings, OrganizedKeybindings};
 
 // Resources subfolder name - change this to customize the bundled resources folder
 // Note: Tauri automatically names this "_up_" in the bundle, so this must match that name
@@ -63,56 +66,109 @@ fn detect_joysticks() -> Result<Vec<directinput::JoystickInfo>, String> {
 }
 
 #[tauri::command]
-async fn wait_for_input_binding(session_id: String, timeout_secs: u64) -> Result<Option<directinput::DetectedInput>, String> {
+fn get_connected_devices() -> Result<Vec<directinput::DeviceInfo>, String> {
+    directinput::list_connected_devices()
+}
+
+#[tauri::command]
+fn get_device_axis_mapping(device_uuid: String) -> Result<HashMap<u32, String>, String> {
+    let devices = directinput::list_connected_devices()?;
+    let device = devices
+        .into_iter()
+        .find(|d| d.uuid == device_uuid)
+        .ok_or_else(|| format!("Device with UUID {} not found", device_uuid))?;
+
+    let (_profile_name, profile) = device_profiles::profile_for_device(&device.name);
+    Ok(device_profiles::invert_profile(&profile))
+}
+
+#[tauri::command]
+fn detect_axis_movement(
+    device_uuid: String,
+    timeout_millis: Option<u64>,
+) -> Result<Option<directinput::AxisMovement>, String> {
+    let timeout = timeout_millis.unwrap_or(100); // Default 100ms for polling
+    directinput::detect_axis_movement_for_device(&device_uuid, timeout)
+}
+
+#[tauri::command]
+fn get_axis_profiles() -> HashMap<String, HashMap<String, u32>> {
+    device_profiles::profiles_snapshot()
+}
+
+#[tauri::command]
+async fn wait_for_input_binding(
+    session_id: String,
+    timeout_secs: u64,
+) -> Result<Option<directinput::DetectedInput>, String> {
+    // Run the blocking operation in a separate thread to avoid freezing the UI
+    tokio::task::spawn_blocking(move || directinput::wait_for_input(session_id, timeout_secs))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+async fn wait_for_multiple_inputs(
+    session_id: String,
+    initial_timeout_secs: u64,
+    collect_duration_secs: u64,
+) -> Result<Vec<directinput::DetectedInput>, String> {
     // Run the blocking operation in a separate thread to avoid freezing the UI
     tokio::task::spawn_blocking(move || {
-        directinput::wait_for_input(session_id, timeout_secs)
+        directinput::wait_for_multiple_inputs(
+            session_id,
+            initial_timeout_secs,
+            collect_duration_secs,
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-async fn wait_for_multiple_inputs(session_id: String, initial_timeout_secs: u64, collect_duration_secs: u64) -> Result<Vec<directinput::DetectedInput>, String> {
+async fn wait_for_inputs_with_events(
+    window: tauri::Window,
+    session_id: String,
+    initial_timeout_secs: u64,
+    collect_duration_secs: u64,
+) -> Result<(), String> {
     // Run the blocking operation in a separate thread to avoid freezing the UI
     tokio::task::spawn_blocking(move || {
-        directinput::wait_for_multiple_inputs(session_id, initial_timeout_secs, collect_duration_secs)
+        directinput::wait_for_inputs_with_events(
+            window,
+            session_id,
+            initial_timeout_secs,
+            collect_duration_secs,
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-async fn wait_for_inputs_with_events(window: tauri::Window, session_id: String, initial_timeout_secs: u64, collect_duration_secs: u64) -> Result<(), String> {
-    // Run the blocking operation in a separate thread to avoid freezing the UI
-    tokio::task::spawn_blocking(move || {
-        directinput::wait_for_inputs_with_events(window, session_id, initial_timeout_secs, collect_duration_secs)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[tauri::command]
-fn load_keybindings(file_path: String, state: tauri::State<Mutex<AppState>>) -> Result<OrganizedKeybindings, String> {
+fn load_keybindings(
+    file_path: String,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<OrganizedKeybindings, String> {
     // Read the XML file
-    let xml_content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
+    let xml_content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+
     // Parse the XML
     let action_maps = ActionMaps::from_xml(&xml_content)?;
-    
+
     // Extract filename from path
     let file_name = std::path::Path::new(&file_path)
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("layout_exported.xml")
         .to_string();
-    
+
     // Store in state
     let mut app_state = state.lock().unwrap();
     app_state.current_bindings = Some(action_maps.clone());
     app_state.current_file_name = Some(file_name);
-    
+
     // Organize the data for the UI
     Ok(action_maps.organize())
 }
@@ -124,7 +180,7 @@ fn update_binding(
     new_input: String,
     multi_tap: Option<u32>,
     activation_mode: Option<String>,
-    state: tauri::State<Mutex<AppState>>
+    state: tauri::State<Mutex<AppState>>,
 ) -> Result<(), String> {
     eprintln!("update_binding called with:");
     eprintln!("  action_map_name: '{}'", action_map_name);
@@ -132,44 +188,78 @@ fn update_binding(
     eprintln!("  new_input: '{}'", new_input);
     eprintln!("  multi_tap: {:?}", multi_tap);
     eprintln!("  activation_mode: {:?}", activation_mode);
-    
+
     let mut app_state = state.lock().unwrap();
-    
+
     if let Some(ref mut bindings) = app_state.current_bindings {
         eprintln!("Current bindings available, checking action maps...");
-        eprintln!("Available action maps: {:?}", bindings.action_maps.iter().map(|am| &am.name).collect::<Vec<_>>());
-        
+        eprintln!(
+            "Available action maps: {:?}",
+            bindings
+                .action_maps
+                .iter()
+                .map(|am| &am.name)
+                .collect::<Vec<_>>()
+        );
+
         // Find the action map
-        if let Some(action_map) = bindings.action_maps.iter_mut().find(|am| am.name == action_map_name) {
+        if let Some(action_map) = bindings
+            .action_maps
+            .iter_mut()
+            .find(|am| am.name == action_map_name)
+        {
             eprintln!("Found action map: '{}'", action_map_name);
-            eprintln!("Available actions: {:?}", action_map.actions.iter().map(|a| &a.name).collect::<Vec<_>>());
-            
+            eprintln!(
+                "Available actions: {:?}",
+                action_map
+                    .actions
+                    .iter()
+                    .map(|a| &a.name)
+                    .collect::<Vec<_>>()
+            );
+
             // Find the action
-            if let Some(action) = action_map.actions.iter_mut().find(|a| a.name == action_name) {
+            if let Some(action) = action_map
+                .actions
+                .iter_mut()
+                .find(|a| a.name == action_name)
+            {
                 eprintln!("Found action: '{}'", action_name);
-                
+
                 // Create the new rebind
                 let new_rebind = keybindings::Rebind {
                     input: new_input.clone(),
                     multi_tap,
                     activation_mode: activation_mode.unwrap_or_default(),
                 };
-                eprintln!("New rebind: input='{}', multi_tap={:?}, activation_mode='{}'", 
-                         new_rebind.input, new_rebind.multi_tap, new_rebind.activation_mode);
-                
-                // Check if we're updating an existing binding with the exact same input
-                let existing_index = action.rebinds.iter().position(|r| r.input == new_input);
-                
-                if let Some(index) = existing_index {
-                    // Update the existing binding
-                    eprintln!("Updating existing binding at index {}", index);
-                    action.rebinds[index] = new_rebind;
+                eprintln!(
+                    "New rebind: input='{}', multi_tap={:?}, activation_mode='{}'",
+                    new_rebind.input, new_rebind.multi_tap, new_rebind.activation_mode
+                );
+
+                let new_input_type = new_rebind.get_input_type();
+
+                // Extract device instance from the new input (e.g., "js1" from "js1_button3")
+                let new_device_instance = if let Some(underscore_pos) = new_input.find('_') {
+                    new_input[..underscore_pos].to_string()
                 } else {
-                    // Add as a new binding
-                    eprintln!("Adding new binding");
-                    action.rebinds.push(new_rebind);
-                }
-                
+                    new_input.clone()
+                };
+
+                // Remove any existing binding from the same device instance
+                // This ensures we only have one binding per device (js1, js2, kb1, mouse1, etc.)
+                action.rebinds.retain(|r| {
+                    let existing_device_instance = if let Some(underscore_pos) = r.input.find('_') {
+                        r.input[..underscore_pos].to_string()
+                    } else {
+                        r.input.clone()
+                    };
+                    existing_device_instance != new_device_instance
+                });
+
+                // Add the new binding
+                action.rebinds.push(new_rebind);
+
                 eprintln!("Successfully updated binding");
                 return Ok(());
             } else {
@@ -181,20 +271,20 @@ fn update_binding(
     } else {
         eprintln!("No current bindings loaded in state");
     }
-    
+
     // If we couldn't find it in current_bindings, try to create the structure from all_binds
     eprintln!("Attempting to use all_binds as template...");
     if let Some(ref all_binds) = app_state.all_binds {
         eprintln!("AllBinds available, looking for action...");
-        
+
         // Find the action in all_binds to verify it exists
-        let found = all_binds.action_maps.iter()
-            .any(|am| am.name == action_map_name && 
-                      am.actions.iter().any(|a| a.name == action_name));
-        
+        let found = all_binds.action_maps.iter().any(|am| {
+            am.name == action_map_name && am.actions.iter().any(|a| a.name == action_name)
+        });
+
         if found {
             eprintln!("Action found in all_binds, creating user binding entry");
-            
+
             // Initialize or update current_bindings from all_binds structure
             if app_state.current_bindings.is_none() {
                 eprintln!("Creating new current_bindings structure");
@@ -209,26 +299,49 @@ fn update_binding(
                     },
                 });
             }
-            
+
             if let Some(ref mut bindings) = app_state.current_bindings {
                 // Find or create the action map
-                if let Some(action_map) = bindings.action_maps.iter_mut().find(|am| am.name == action_map_name) {
+                if let Some(action_map) = bindings
+                    .action_maps
+                    .iter_mut()
+                    .find(|am| am.name == action_map_name)
+                {
                     // Find or create the action
-                    if let Some(action) = action_map.actions.iter_mut().find(|a| a.name == action_name) {
-                        // Update existing action - replace bindings of the same input type
+                    if let Some(action) = action_map
+                        .actions
+                        .iter_mut()
+                        .find(|a| a.name == action_name)
+                    {
+                        // Update existing action
                         let new_rebind = keybindings::Rebind {
                             input: new_input.clone(),
                             multi_tap,
                             activation_mode: activation_mode.clone().unwrap_or_default(),
                         };
-                        let new_input_type = new_rebind.get_input_type();
-                        
-                        // Remove any existing rebinds of the same input type
-                        action.rebinds.retain(|r| r.get_input_type() != new_input_type);
-                        
+
+                        // Extract device instance from the new input (e.g., "js1" from "js1_button3")
+                        let new_device_instance = if let Some(underscore_pos) = new_input.find('_')
+                        {
+                            new_input[..underscore_pos].to_string()
+                        } else {
+                            new_input.clone()
+                        };
+
+                        // Remove any existing binding from the same device instance
+                        action.rebinds.retain(|r| {
+                            let existing_device_instance =
+                                if let Some(underscore_pos) = r.input.find('_') {
+                                    r.input[..underscore_pos].to_string()
+                                } else {
+                                    r.input.clone()
+                                };
+                            existing_device_instance != new_device_instance
+                        });
+
                         // Add the new binding
                         action.rebinds.push(new_rebind);
-                        eprintln!("Successfully updated binding (existing action, replaced same input type)");
+                        eprintln!("Successfully updated binding (existing action, replaced same device instance)");
                         return Ok(());
                     } else {
                         // Create new action
@@ -254,7 +367,8 @@ fn update_binding(
                             activation_mode: activation_mode.unwrap_or_default(),
                         }],
                     };
-                    let new_action_map = ActionMaps::new_empty_action_map(action_map_name.clone(), vec![new_action]);
+                    let new_action_map =
+                        ActionMaps::new_empty_action_map(action_map_name.clone(), vec![new_action]);
                     bindings.action_maps.push(new_action_map);
                     eprintln!("Successfully updated binding (new action map)");
                     return Ok(());
@@ -266,7 +380,7 @@ fn update_binding(
     } else {
         eprintln!("AllBinds not available");
     }
-    
+
     Err("Action not found".to_string())
 }
 
@@ -274,20 +388,27 @@ fn update_binding(
 fn reset_binding(
     action_map_name: String,
     action_name: String,
-    state: tauri::State<Mutex<AppState>>
+    state: tauri::State<Mutex<AppState>>,
 ) -> Result<(), String> {
     let mut app_state = state.lock().unwrap();
-    
-    eprintln!("Resetting binding for action: {} in map: {}", action_name, action_map_name);
-    
+
+    eprintln!(
+        "Resetting binding for action: {} in map: {}",
+        action_name, action_map_name
+    );
+
     // Remove the custom binding from current_bindings
     // This will cause the merged view to show defaults from AllBinds again
     if let Some(ref mut bindings) = app_state.current_bindings {
-        if let Some(action_map) = bindings.action_maps.iter_mut().find(|am| am.name == action_map_name) {
+        if let Some(action_map) = bindings
+            .action_maps
+            .iter_mut()
+            .find(|am| am.name == action_map_name)
+        {
             // Remove the action entirely
             action_map.actions.retain(|a| a.name != action_name);
             eprintln!("Removed custom binding for action: {}", action_name);
-            
+
             // If the action map is now empty, optionally remove it
             // (keeping empty action maps shouldn't cause issues)
         }
@@ -298,9 +419,11 @@ fn reset_binding(
 }
 
 #[tauri::command]
-fn get_current_bindings(state: tauri::State<Mutex<AppState>>) -> Result<OrganizedKeybindings, String> {
+fn get_current_bindings(
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<OrganizedKeybindings, String> {
     let app_state = state.lock().unwrap();
-    
+
     if let Some(ref bindings) = app_state.current_bindings {
         Ok(bindings.organize())
     } else {
@@ -309,9 +432,12 @@ fn get_current_bindings(state: tauri::State<Mutex<AppState>>) -> Result<Organize
 }
 
 #[tauri::command]
-fn export_keybindings(file_path: String, state: tauri::State<Mutex<AppState>>) -> Result<(), String> {
+fn export_keybindings(
+    file_path: String,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<(), String> {
     let mut app_state = state.lock().unwrap();
-    
+
     if let Some(ref mut bindings) = app_state.current_bindings {
         // Extract filename from path (without extension)
         let mut file_name = std::path::Path::new(&file_path)
@@ -319,28 +445,28 @@ fn export_keybindings(file_path: String, state: tauri::State<Mutex<AppState>>) -
             .and_then(|s| s.to_str())
             .unwrap_or("Profile")
             .to_string();
-        
+
         // Remove "_exported" suffix if present
         if file_name.ends_with("_exported") {
             file_name.truncate(file_name.len() - 9); // Remove "_exported" (9 chars)
         }
-        
+
         // Update profile name to match the filename
         bindings.profile_name = file_name;
     }
-    
+
     // Drop the mutable borrow before creating immutable borrow
     if let Some(ref bindings) = app_state.current_bindings {
         // Get AllBinds for category mapping
         let all_binds = app_state.all_binds.as_ref();
-        
+
         // Serialize to XML with category information
         let xml_content = bindings.to_xml_with_categories(all_binds);
-        
+
         // Write to file
         std::fs::write(&file_path, xml_content)
             .map_err(|e| format!("Failed to write keybindings file: {}", e))?;
-        
+
         Ok(())
     } else {
         Err("No keybindings loaded to export".to_string())
@@ -357,20 +483,24 @@ fn save_template(file_path: String, template_json: String) -> Result<(), String>
 
 #[tauri::command]
 fn load_template(file_path: String) -> Result<String, String> {
-    std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to load template: {}", e))
+    std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to load template: {}", e))
 }
 
 #[tauri::command]
-fn load_all_binds(state: tauri::State<Mutex<AppState>>, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn load_all_binds(
+    state: tauri::State<Mutex<AppState>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     // Load AllBinds.xml from resources
     let all_binds_path = if cfg!(debug_assertions) {
         // Development: look in project root
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Failed to get exe path: {}", e))?;
-        let exe_dir = exe_path.parent()
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+        let exe_dir = exe_path
+            .parent()
             .ok_or_else(|| "Failed to get exe directory".to_string())?;
-        exe_dir.parent()
+        exe_dir
+            .parent()
             .and_then(|p| p.parent())
             .and_then(|p| p.parent())
             .ok_or_else(|| "Failed to find project root".to_string())?
@@ -378,31 +508,32 @@ fn load_all_binds(state: tauri::State<Mutex<AppState>>, app_handle: tauri::AppHa
     } else {
         // Production: use Tauri's resource resolver
         // File is in the resources subfolder within resources
-        app_handle.path()
+        app_handle
+            .path()
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?
             .join(RESOURCES_SUBFOLDER)
             .join("AllBinds.xml")
     };
-    
+
     // Read the XML file
     let xml_content = std::fs::read_to_string(&all_binds_path)
         .map_err(|e| format!("Failed to read AllBinds.xml at {:?}: {}", all_binds_path, e))?;
-    
+
     // Parse the XML
     let all_binds = AllBinds::from_xml(&xml_content)?;
-    
+
     // Store in state
     let mut app_state = state.lock().unwrap();
     app_state.all_binds = Some(all_binds);
-    
+
     Ok(())
 }
 
 #[tauri::command]
 fn get_merged_bindings(state: tauri::State<Mutex<AppState>>) -> Result<MergedBindings, String> {
     let app_state = state.lock().unwrap();
-    
+
     if let Some(ref all_binds) = app_state.all_binds {
         // Merge with user bindings if they exist
         let user_bindings = app_state.current_bindings.as_ref();
@@ -413,15 +544,58 @@ fn get_merged_bindings(state: tauri::State<Mutex<AppState>>) -> Result<MergedBin
 }
 
 #[tauri::command]
+fn get_user_customizations(
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<Option<ActionMaps>, String> {
+    let app_state = state.lock().unwrap();
+
+    eprintln!("get_user_customizations called");
+    eprintln!(
+        "  has_current_bindings: {}",
+        app_state.current_bindings.is_some()
+    );
+    if let Some(ref bindings) = app_state.current_bindings {
+        eprintln!("  action_maps_count: {}", bindings.action_maps.len());
+        eprintln!("  profile_name: {}", bindings.profile_name);
+    }
+
+    // Return a clone of the user's customizations (delta only)
+    // This is what gets cached and is much smaller than the full merged view
+    Ok(app_state.current_bindings.clone())
+}
+
+#[tauri::command]
+fn restore_user_customizations(
+    customizations: Option<ActionMaps>,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<(), String> {
+    eprintln!("restore_user_customizations called");
+    eprintln!("  has_data: {}", customizations.is_some());
+    if let Some(ref c) = customizations {
+        eprintln!("  action_maps_count: {}", c.action_maps.len());
+        eprintln!("  profile_name: {}", c.profile_name);
+    }
+
+    let mut app_state = state.lock().unwrap();
+
+    // Restore the cached user customizations (delta) to backend state
+    // This allows us to preserve unsaved work across app restarts
+    app_state.current_bindings = customizations;
+
+    eprintln!("restore_user_customizations completed successfully");
+    Ok(())
+}
+
+#[tauri::command]
 fn find_conflicting_bindings(
     input: String,
     exclude_action_map: String,
     exclude_action: String,
-    state: tauri::State<Mutex<AppState>>
+    state: tauri::State<Mutex<AppState>>,
 ) -> Result<Vec<ConflictingBinding>, String> {
     let app_state = state.lock().unwrap();
     let mut conflicts = Vec::new();
-    
+
     // Check in current bindings
     if let Some(ref bindings) = app_state.current_bindings {
         for action_map in &bindings.action_maps {
@@ -430,7 +604,7 @@ fn find_conflicting_bindings(
                 if action_map.name == exclude_action_map && action.name == exclude_action {
                     continue;
                 }
-                
+
                 // Check if this action has the same input bound
                 for rebind in &action.rebinds {
                     if rebind.input == input {
@@ -446,22 +620,28 @@ fn find_conflicting_bindings(
             }
         }
     }
-    
+
     // Enhance with UI labels from AllBinds
     if let Some(ref all_binds) = app_state.all_binds {
         for conflict in &mut conflicts {
-            if let Some(all_binds_map) = all_binds.action_maps.iter()
-                .find(|am| am.name == conflict.action_map_name) {
+            if let Some(all_binds_map) = all_binds
+                .action_maps
+                .iter()
+                .find(|am| am.name == conflict.action_map_name)
+            {
                 conflict.action_map_label = all_binds_map.ui_label.clone();
-                
-                if let Some(all_binds_action) = all_binds_map.actions.iter()
-                    .find(|a| a.name == conflict.action_name) {
+
+                if let Some(all_binds_action) = all_binds_map
+                    .actions
+                    .iter()
+                    .find(|a| a.name == conflict.action_name)
+                {
                     conflict.action_label = all_binds_action.ui_label.clone();
                 }
             }
         }
     }
-    
+
     Ok(conflicts)
 }
 
@@ -470,15 +650,15 @@ fn clear_specific_binding(
     action_map_name: String,
     action_name: String,
     input_to_clear: String,
-    state: tauri::State<Mutex<AppState>>
+    state: tauri::State<Mutex<AppState>>,
 ) -> Result<(), String> {
     eprintln!("clear_specific_binding called with:");
     eprintln!("  action_map_name: '{}'", action_map_name);
     eprintln!("  action_name: '{}'", action_name);
     eprintln!("  input_to_clear: '{}'", input_to_clear);
-    
+
     let mut app_state = state.lock().unwrap();
-    
+
     // Determine the input type of the binding to clear
     let clear_rebind = keybindings::Rebind {
         input: input_to_clear.clone(),
@@ -487,7 +667,7 @@ fn clear_specific_binding(
     };
     let input_type = clear_rebind.get_input_type();
     eprintln!("Input type to clear: {:?}", input_type);
-    
+
     // Extract the joystick instance number if it's a joystick binding
     let js_instance = if matches!(input_type, keybindings::InputType::Joystick) {
         if let Some(js_part) = input_to_clear.split('_').next() {
@@ -502,39 +682,40 @@ fn clear_specific_binding(
     } else {
         None
     };
-    
+
     // Check if this action has a default binding for this input type in AllBinds.xml
     let has_default_binding = if let Some(ref all_binds) = app_state.all_binds {
-        all_binds.action_maps.iter()
-            .any(|am| am.name == action_map_name && 
-                am.actions.iter().any(|a| {
+        all_binds.action_maps.iter().any(|am| {
+            am.name == action_map_name
+                && am.actions.iter().any(|a| {
                     if a.name != action_name {
                         return false;
                     }
-                    
+
                     // Check if there's a non-empty default binding for this input type
                     match input_type {
                         keybindings::InputType::Joystick => {
                             !a.default_joystick.is_empty() && a.default_joystick.trim() != ""
-                        },
+                        }
                         keybindings::InputType::Keyboard => {
                             !a.default_keyboard.is_empty() && a.default_keyboard.trim() != ""
-                        },
+                        }
                         keybindings::InputType::Mouse => {
                             !a.default_mouse.is_empty() && a.default_mouse.trim() != ""
-                        },
+                        }
                         keybindings::InputType::Gamepad => {
                             !a.default_gamepad.is_empty() && a.default_gamepad.trim() != ""
-                        },
+                        }
                         keybindings::InputType::Unknown => false,
                     }
-                }))
+                })
+        })
     } else {
         false
     };
-    
+
     eprintln!("Has default binding: {}", has_default_binding);
-    
+
     // Only create a cleared binding if there's a default to override
     let cleared_input = if has_default_binding {
         match input_type {
@@ -544,7 +725,7 @@ fn clear_specific_binding(
                 } else {
                     "js1_ ".to_string()
                 }
-            },
+            }
             keybindings::InputType::Keyboard => "kb1_ ".to_string(),
             keybindings::InputType::Mouse => "mouse1_ ".to_string(),
             keybindings::InputType::Gamepad => "gp1_ ".to_string(),
@@ -554,16 +735,24 @@ fn clear_specific_binding(
         // No default binding, so we can just remove it entirely
         String::new()
     };
-    
+
     eprintln!("Cleared input string: '{}'", cleared_input);
-    
+
     // If there's no default binding and we're just removing, we can delete the entire action if it becomes empty
     if cleared_input.is_empty() {
         eprintln!("No default binding, removing the binding entirely");
-        
+
         if let Some(ref mut bindings) = app_state.current_bindings {
-            if let Some(action_map) = bindings.action_maps.iter_mut().find(|am| am.name == action_map_name) {
-                if let Some(action) = action_map.actions.iter_mut().find(|a| a.name == action_name) {
+            if let Some(action_map) = bindings
+                .action_maps
+                .iter_mut()
+                .find(|am| am.name == action_map_name)
+            {
+                if let Some(action) = action_map
+                    .actions
+                    .iter_mut()
+                    .find(|a| a.name == action_name)
+                {
                     // Remove existing bindings of this input type
                     action.rebinds.retain(|r| r.get_input_type() != input_type);
                     eprintln!("Removed binding without adding cleared entry");
@@ -572,7 +761,7 @@ fn clear_specific_binding(
         }
         return Ok(());
     }
-    
+
     // Initialize current_bindings if it doesn't exist
     if app_state.current_bindings.is_none() {
         eprintln!("Creating new current_bindings structure");
@@ -587,10 +776,14 @@ fn clear_specific_binding(
             },
         });
     }
-    
+
     if let Some(ref mut bindings) = app_state.current_bindings {
         // Find or create the action map
-        let action_map = if let Some(am) = bindings.action_maps.iter_mut().find(|am| am.name == action_map_name) {
+        let action_map = if let Some(am) = bindings
+            .action_maps
+            .iter_mut()
+            .find(|am| am.name == action_map_name)
+        {
             am
         } else {
             // Create new action map
@@ -600,9 +793,13 @@ fn clear_specific_binding(
             });
             bindings.action_maps.last_mut().unwrap()
         };
-        
+
         // Find or create the action
-        let action = if let Some(a) = action_map.actions.iter_mut().find(|a| a.name == action_name) {
+        let action = if let Some(a) = action_map
+            .actions
+            .iter_mut()
+            .find(|a| a.name == action_name)
+        {
             a
         } else {
             // Create new action
@@ -612,17 +809,17 @@ fn clear_specific_binding(
             });
             action_map.actions.last_mut().unwrap()
         };
-        
+
         // Remove existing bindings of this input type
         action.rebinds.retain(|r| r.get_input_type() != input_type);
-        
+
         // Add the cleared binding (with trailing space to indicate it's explicitly unbound)
         action.rebinds.push(keybindings::Rebind {
             input: cleared_input,
             multi_tap: None,
             activation_mode: String::new(),
         });
-        
+
         eprintln!("Successfully cleared binding with explicit unbind entry");
         Ok(())
     } else {
@@ -641,35 +838,35 @@ fn clear_custom_bindings(state: tauri::State<Mutex<AppState>>) -> Result<(), Str
 #[tauri::command]
 fn scan_sc_installations(base_path: String) -> Result<Vec<ScInstallation>, String> {
     use std::path::Path;
-    
+
     let base = Path::new(&base_path);
-    
+
     // Check if the base path exists
     if !base.exists() {
         return Err("Directory does not exist".to_string());
     }
-    
+
     if !base.is_dir() {
         return Err("Path is not a directory".to_string());
     }
-    
+
     let mut installations = Vec::new();
-    
+
     // Common Star Citizen installation folder names
     let sc_folders = ["LIVE", "PTU", "EPTU", "TECH-PREVIEW"];
-    
+
     // Scan for each potential installation
     for folder_name in &sc_folders {
         let folder_path = base.join(folder_name);
-        
+
         // Check if this folder exists
         if !folder_path.exists() || !folder_path.is_dir() {
             continue;
         }
-        
+
         // Check for data.p4k in the Data folder
         let data_p4k_path = folder_path.join("data.p4k");
-        
+
         if data_p4k_path.exists() && data_p4k_path.is_file() {
             installations.push(ScInstallation {
                 name: folder_name.to_string(),
@@ -677,14 +874,14 @@ fn scan_sc_installations(base_path: String) -> Result<Vec<ScInstallation>, Strin
             });
         }
     }
-    
+
     Ok(installations)
 }
 
 #[tauri::command]
 fn get_current_file_name(state: tauri::State<Mutex<AppState>>) -> Result<String, String> {
     let app_state = state.lock().unwrap();
-    
+
     if let Some(ref file_name) = app_state.current_file_name {
         Ok(file_name.clone())
     } else {
@@ -695,20 +892,24 @@ fn get_current_file_name(state: tauri::State<Mutex<AppState>>) -> Result<String,
 #[tauri::command]
 fn save_bindings_to_install(
     installation_path: String,
-    state: tauri::State<Mutex<AppState>>
+    state: tauri::State<Mutex<AppState>>,
 ) -> Result<(), String> {
     use std::path::Path;
-    
+
     let app_state = state.lock().unwrap();
-    
+
     // Get the current bindings
-    let bindings = app_state.current_bindings.as_ref()
+    let bindings = app_state
+        .current_bindings
+        .as_ref()
         .ok_or_else(|| "No keybindings loaded".to_string())?;
-    
+
     // Get the filename
-    let file_name = app_state.current_file_name.as_ref()
+    let file_name = app_state
+        .current_file_name
+        .as_ref()
         .ok_or_else(|| "No filename stored".to_string())?;
-    
+
     // Build the target path: INSTALL\user\client\0\controls\mappings
     let target_dir = Path::new(&installation_path)
         .join("user")
@@ -716,31 +917,30 @@ fn save_bindings_to_install(
         .join("0")
         .join("controls")
         .join("mappings");
-    
+
     // Create the directory structure if it doesn't exist
     std::fs::create_dir_all(&target_dir)
         .map_err(|e| format!("Failed to create directory structure: {}", e))?;
-    
+
     // Full path to the target file
     let target_file = target_dir.join(file_name);
-    
+
     // Get AllBinds for category mapping
     let all_binds = app_state.all_binds.as_ref();
-    
+
     // Serialize to XML with category information
     let xml_content = bindings.to_xml_with_categories(all_binds);
-    
+
     // Write to the target location
     std::fs::write(&target_file, xml_content)
         .map_err(|e| format!("Failed to write keybindings file: {}", e))?;
-    
+
     Ok(())
 }
 
 #[tauri::command]
 fn write_binary_file(path: String, contents: Vec<u8>) -> Result<(), String> {
-    std::fs::write(&path, contents)
-        .map_err(|e| format!("Failed to write file: {}", e))
+    std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {}", e))
 }
 
 #[tauri::command]
@@ -761,10 +961,11 @@ fn log_info(message: String) -> Result<(), String> {
 
 #[tauri::command]
 fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let log_dir = app_handle.path()
+    let log_dir = app_handle
+        .path()
         .app_log_dir()
         .map_err(|e| format!("Failed to get log directory: {}", e))?;
-    
+
     let log_file = log_dir.join("sc-joy-mapper.log");
     Ok(log_file.to_string_lossy().to_string())
 }
@@ -773,29 +974,33 @@ fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
 fn get_resource_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = if cfg!(debug_assertions) {
         // Development: look in project root
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Failed to get exe path: {}", e))?;
-        let exe_dir = exe_path.parent()
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+        let exe_dir = exe_path
+            .parent()
             .ok_or_else(|| "Failed to get exe directory".to_string())?;
-        exe_dir.parent()
+        exe_dir
+            .parent()
             .and_then(|p| p.parent())
             .and_then(|p| p.parent())
             .ok_or_else(|| "Failed to find project root".to_string())?
             .to_path_buf()
     } else {
         // Production: use Tauri's resource resolver
-        app_handle.path()
+        app_handle
+            .path()
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?
             .join(RESOURCES_SUBFOLDER)
     };
-    
+
     Ok(resource_dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 async fn open_url(app_handle: tauri::AppHandle, url: String) -> Result<(), String> {
-    app_handle.opener()
+    app_handle
+        .opener()
         .open_url(&url, None::<&str>)
         .map_err(|e| format!("Failed to open URL: {}", e))
 }
@@ -803,19 +1008,21 @@ async fn open_url(app_handle: tauri::AppHandle, url: String) -> Result<(), Strin
 fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::OpenOptions;
     use std::io::Write;
-    
+
     // Get log directory
     let log_dir = app_handle.path().app_log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
-    
+
     let log_file = log_dir.join("sc-joy-mapper.log");
-    
+
     // Set up file logging with env_logger
-    let target = Box::new(OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)?);
-    
+    let target = Box::new(
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)?,
+    );
+
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(target))
         .format(|buf, record| {
@@ -828,12 +1035,160 @@ fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error
             )
         })
         .init();
-    
+
     info!("=== SC Joy Mapper Started ===");
     info!("Version: {}", env!("CARGO_PKG_VERSION"));
     info!("Log file: {:?}", log_file);
-    
+
     Ok(())
+}
+
+// Struct for unbind profile generation result
+#[derive(serde::Serialize)]
+struct UnbindProfileResult {
+    saved_locations: Vec<String>,
+}
+
+// Struct for unbind profile removal result
+#[derive(serde::Serialize)]
+struct RemoveUnbindResult {
+    removed_count: usize,
+}
+
+#[tauri::command]
+fn generate_unbind_profile(
+    devices: keybindings::DeviceSelection,
+    base_path: String,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<UnbindProfileResult, String> {
+    use std::fs;
+
+    info!(
+        "Generating unbind profile for devices: keyboard={}, mouse={}, gamepad={}, js1={}, js2={}",
+        devices.keyboard, devices.mouse, devices.gamepad, devices.joystick1, devices.joystick2
+    );
+    info!("Using base path: {}", base_path);
+
+    // Get AllBinds from state
+    let app_state = state
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
+    let all_binds = app_state
+        .all_binds
+        .as_ref()
+        .ok_or("AllBinds not loaded. Please load the keybindings first.")?;
+
+    // Generate the unbind XML
+    let unbind_xml = keybindings::generate_unbind_xml(all_binds, &devices)?;
+
+    info!("Generated unbind XML, length: {} bytes", unbind_xml.len());
+
+    // Try to save to SC installation directories
+    let mut saved_locations = Vec::new();
+
+    // Get SC installations
+    match scan_sc_installations(base_path.clone()) {
+        Ok(installations) => {
+            info!("Found {} SC installations", installations.len());
+            for install in installations {
+                info!(
+                    "Processing installation: {} at {}",
+                    install.name, install.path
+                );
+                let mappings_dir = format!("{}\\user\\client\\0\\controls\\mappings", install.path);
+
+                // Create directory if it doesn't exist
+                if let Err(e) = fs::create_dir_all(&mappings_dir) {
+                    error!(
+                        "Failed to create mappings directory {}: {}",
+                        mappings_dir, e
+                    );
+                    continue;
+                }
+
+                let file_path = format!("{}\\UNBIND_ALL.xml", mappings_dir);
+                info!("Attempting to write to: {}", file_path);
+                match fs::write(&file_path, &unbind_xml) {
+                    Ok(_) => {
+                        info!("Successfully saved unbind profile to: {}", file_path);
+                        saved_locations.push(file_path);
+                    }
+                    Err(e) => error!("Failed to write to {}: {}", file_path, e),
+                }
+            }
+        }
+        Err(e) => {
+            error!(
+                "Failed to scan SC installations from base path '{}': {}",
+                base_path, e
+            );
+        }
+    }
+
+    // If no installations found, save to current directory as fallback
+    if saved_locations.is_empty() {
+        let fallback_path = "UNBIND_ALL.xml";
+        fs::write(fallback_path, &unbind_xml)
+            .map_err(|e| format!("Failed to write unbind profile: {}", e))?;
+        saved_locations.push(fallback_path.to_string());
+        info!(
+            "Saved unbind profile to current directory: {}",
+            fallback_path
+        );
+    }
+
+    Ok(UnbindProfileResult { saved_locations })
+}
+
+#[tauri::command]
+fn remove_unbind_profile() -> Result<RemoveUnbindResult, String> {
+    use std::fs;
+
+    info!("Removing unbind profile files");
+
+    let mut removed_count = 0;
+
+    // Get base path for SC installations
+    let base_path = "C:\\Program Files\\Roberts Space Industries\\StarCitizen".to_string();
+
+    // Get SC installations
+    match scan_sc_installations(base_path) {
+        Ok(installations) => {
+            for install in installations {
+                let file_path = format!(
+                    "{}\\user\\client\\0\\controls\\mappings\\UNBIND_ALL.xml",
+                    install.path
+                );
+
+                if fs::metadata(&file_path).is_ok() {
+                    match fs::remove_file(&file_path) {
+                        Ok(_) => {
+                            info!("Removed unbind profile from: {}", file_path);
+                            removed_count += 1;
+                        }
+                        Err(e) => error!("Failed to remove {}: {}", file_path, e),
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to scan SC installations: {}", e);
+        }
+    }
+
+    // Also try to remove from current directory
+    let fallback_path = "UNBIND_ALL.xml";
+    if fs::metadata(fallback_path).is_ok() {
+        match fs::remove_file(fallback_path) {
+            Ok(_) => {
+                info!("Removed unbind profile from current directory");
+                removed_count += 1;
+            }
+            Err(e) => error!("Failed to remove {}: {}", fallback_path, e),
+        }
+    }
+
+    Ok(RemoveUnbindResult { removed_count })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -846,6 +1201,10 @@ pub fn run() {
             get_app_version,
             greet,
             detect_joysticks,
+            get_connected_devices,
+            get_device_axis_mapping,
+            detect_axis_movement,
+            get_axis_profiles,
             wait_for_input_binding,
             wait_for_multiple_inputs,
             wait_for_inputs_with_events,
@@ -858,6 +1217,8 @@ pub fn run() {
             load_template,
             load_all_binds,
             get_merged_bindings,
+            get_user_customizations,
+            restore_user_customizations,
             find_conflicting_bindings,
             clear_specific_binding,
             clear_custom_bindings,
@@ -869,13 +1230,54 @@ pub fn run() {
             log_info,
             get_log_file_path,
             get_resource_dir,
-            open_url
+            open_url,
+            generate_unbind_profile,
+            remove_unbind_profile
         ])
         .setup(|app| {
             // Set up logging
             if let Err(e) = setup_logging(app.handle()) {
                 eprintln!("Failed to set up logging: {}", e);
             }
+
+            // Initialize device database
+            let db_path = if cfg!(debug_assertions) {
+                // Development: look in src-tauri directory
+                let exe_path =
+                    std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+                let exe_dir = exe_path
+                    .parent()
+                    .ok_or_else(|| "Failed to get exe directory".to_string())?;
+                exe_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent())
+                    .ok_or_else(|| "Failed to find project root".to_string())?
+                    .join("src-tauri")
+                    .join("device-database.json")
+            } else {
+                // Production: look in resources
+                let resource_dir = app
+                    .path()
+                    .resource_dir()
+                    .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+                resource_dir
+                    .join(RESOURCES_SUBFOLDER)
+                    .join("device-database.json")
+            };
+
+            eprintln!("Attempting to load device database from: {:?}", db_path);
+            eprintln!("Database exists: {}", db_path.exists());
+            
+            if let Err(e) = device_database::DeviceDatabase::init(&db_path) {
+                eprintln!("Warning: Failed to initialize device database: {}", e);
+                eprintln!("Device lookup will fall back to OS device names");
+                // Don't fail startup if database fails to load
+            } else {
+                info!("Device database initialized successfully");
+                eprintln!("Device database loaded successfully!");
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -886,4 +1288,3 @@ pub fn run() {
             }
         });
 }
-

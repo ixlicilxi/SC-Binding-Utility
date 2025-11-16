@@ -8,6 +8,7 @@ let uniqueButtons = new Set();
 let uniqueAxes = new Set();
 let uniqueHats = new Set();
 let uniqueKeys = new Set();
+let lastAxisInput = null; // Track the last axis input to prevent spam
 
 // DOM element references (will be set during initialization)
 let startBtn, stopBtn, clearBtn, showDevicesBtn, statusIndicator, timeline, eventCountSpan, autoScrollCheckbox;
@@ -60,6 +61,7 @@ function clearLog()
     uniqueAxes.clear();
     uniqueHats.clear();
     uniqueKeys.clear();
+    lastAxisInput = null; // Reset last axis tracking
     updateStats();
 }
 
@@ -98,6 +100,28 @@ function addEvent(inputData)
 
     // Use shared utility to determine event type
     const eventType = getInputType(inputData.input_string);
+
+    // For axis inputs, check if this is the same axis as the last event
+    // If so, skip it to prevent spam (hundreds of events per second)
+    if (eventType === 'axis')
+    {
+        // Get base axis identifier without direction (e.g., "js1_axis2" from "js1_axis2_positive")
+        const baseAxisId = inputData.input_string.replace(/_(positive|negative)$/, '');
+
+        // If this is the same axis as the last event, skip it
+        if (lastAxisInput === baseAxisId)
+        {
+            return; // Skip duplicate consecutive axis events
+        }
+
+        // Update last axis input for future comparisons
+        lastAxisInput = baseAxisId;
+    }
+    else
+    {
+        // Non-axis input detected, reset the axis tracking so next axis will be shown
+        lastAxisInput = null;
+    }
 
     // Track unique inputs (without direction for axes)
     if (eventType === 'hat')
@@ -166,6 +190,54 @@ function addEvent(inputData)
             </div>`;
     }
 
+    // Build extended debug info display (collapsible)
+    let debugInfoDisplay = '';
+    const hasDebugInfo = inputData.raw_axis_code || inputData.raw_button_code ||
+        inputData.device_name || inputData.device_gilrs_id !== undefined ||
+        inputData.raw_code_index !== undefined;
+
+    if (hasDebugInfo)
+    {
+        const debugDetails = [];
+
+        if (inputData.device_name)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Device Name:</span> <code>${inputData.device_name}</code></div>`);
+        }
+        if (inputData.device_gilrs_id !== undefined && inputData.device_gilrs_id !== null)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Gilrs ID:</span> <code>${inputData.device_gilrs_id}</code></div>`);
+        }
+        if (inputData.raw_code_index !== undefined && inputData.raw_code_index !== null)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Raw Index:</span> <code>${inputData.raw_code_index}</code></div>`);
+        }
+        if (inputData.raw_axis_code)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Axis Code:</span> <code>${inputData.raw_axis_code}</code></div>`);
+        }
+        if (inputData.raw_button_code)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Button Code:</span> <code>${inputData.raw_button_code}</code></div>`);
+        }
+        if (inputData.device_power_info)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Power Info:</span> <code>${inputData.device_power_info}</code></div>`);
+        }
+        if (inputData.device_is_ff_supported !== undefined && inputData.device_is_ff_supported !== null)
+        {
+            debugDetails.push(`<div class="debug-detail"><span class="debug-label">Force Feedback:</span> <code>${inputData.device_is_ff_supported ? 'Yes' : 'No'}</code></div>`);
+        }
+
+        debugInfoDisplay = `
+            <details class="event-debug-info">
+                <summary class="debug-toggle">🔍 Raw Debug Data (${debugDetails.length} fields)</summary>
+                <div class="debug-details">
+                    ${debugDetails.join('')}
+                </div>
+            </details>`;
+    }
+
     eventEl.innerHTML = `
         <div class="event-time">${timeString}</div>
         <div class="event-details">
@@ -174,6 +246,7 @@ function addEvent(inputData)
             ${valueDisplay}
             ${uuidDisplay}
             ${modifiersDisplay}
+            ${debugInfoDisplay}
         </div>
         <div class="event-type ${cssClass}">${displayType}</div>
     `;

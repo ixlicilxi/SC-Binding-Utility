@@ -377,6 +377,13 @@
     font-style: italic;
 }
 
+.binding-info-activation {
+    font-size: 0.75rem;
+    color: #aaa;
+    text-transform: capitalize;
+    margin-top: 0.15rem;
+}
+
 /* Modifier Filter Toolbar */
 .modifier-toolbar {
     position: absolute;

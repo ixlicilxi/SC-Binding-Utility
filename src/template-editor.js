@@ -25,6 +25,7 @@ import
     HatFrameWidth,
     HatFrameHeight
 } from './button-renderer.js';
+import { initializeTemplatePagesUI, refreshTemplatePagesUI } from './template-editor-v2.js';
 
 // Lazy imports - will be loaded when needed
 let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat;
@@ -47,19 +48,14 @@ let templateData = {
     name: '',
     joystickModel: '',
     joystickNumber: 2, // Default to joystick 2 (for dual stick setups) - deprecated, use per-stick joystickNumber
-    imagePath: '',
-    imageDataUrl: null,
-    imageFlipped: 'right', // 'left', 'right', or 'none' - indicates which stick needs to be flipped, or 'none' if no mirroring
-    imageType: 'single', // 'single' (one image for both sticks) or 'dual' (separate left/right images)
-    leftImagePath: '', // For dual image mode
-    leftImageDataUrl: null, // For dual image mode
-    rightImagePath: '', // For dual image mode
-    rightImageDataUrl: null, // For dual image mode
-    leftStick: { joystickNumber: 1, buttons: [] }, // Left stick config
-    rightStick: { joystickNumber: 2, buttons: [] } // Right stick config
+    leftStick: { joystickNumber: 1, buttons: [] }, // Left stick config - deprecated, use pages instead
+    rightStick: { joystickNumber: 2, buttons: [] }, // Right stick config - deprecated, use pages instead
+    version: '1.0',
+    pages: []
 };
 
 let currentStick = 'right'; // Currently editing 'left' or 'right'
+let currentPageId = null;
 let canvas, ctx;
 let loadedImage = null;
 let zoom = 1.0;
@@ -79,6 +75,228 @@ let lastPanPosition = { x: 0, y: 0 };
 // Snapping grid for better alignment when dragging boxes
 const SNAP_GRID = 10; // pixels
 
+function generatePageId()
+{
+    if (window.crypto && window.crypto.randomUUID)
+    {
+        return window.crypto.randomUUID();
+    }
+    return `page_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+}
+
+function syncLegacyStickReferences()
+{
+    if (!Array.isArray(templateData.pages))
+    {
+        templateData.pages = [];
+    }
+
+    templateData.leftStick = templateData.pages[0] || { joystickNumber: 1, buttons: [] };
+    templateData.rightStick = templateData.pages[1] || { joystickNumber: 2, buttons: [] };
+}
+
+function ensureTemplatePages()
+{
+    if (!Array.isArray(templateData.pages))
+    {
+        templateData.pages = [];
+    }
+
+    if (templateData.pages.length === 0)
+    {
+        const leftPage = templateData.leftStick || { joystickNumber: 1, buttons: [] };
+        if (!leftPage.id)
+        {
+            leftPage.id = generatePageId();
+        }
+        leftPage.name = leftPage.name || 'Left Stick';
+        templateData.pages.push(leftPage);
+
+        const rightPage = templateData.rightStick || { joystickNumber: 2, buttons: [] };
+        if (!rightPage.id)
+        {
+            rightPage.id = generatePageId();
+        }
+        rightPage.name = rightPage.name || 'Right Stick';
+        templateData.pages.push(rightPage);
+    }
+    else
+    {
+        templateData.pages.forEach((page, index) =>
+        {
+            if (!page.id)
+            {
+                page.id = generatePageId();
+            }
+            if (!Array.isArray(page.buttons))
+            {
+                page.buttons = [];
+            }
+            if (page.joystickNumber === undefined)
+            {
+                page.joystickNumber = index === 0 ? 1 : 2;
+            }
+            if (!page.name)
+            {
+                page.name = index === 0 ? 'Left Stick' : 'Right Stick';
+            }
+        });
+    }
+
+    syncLegacyStickReferences();
+
+    if (!currentPageId && templateData.pages.length)
+    {
+        currentPageId = templateData.pages[0].id;
+    }
+}
+
+function handleTemplatePagesChanged()
+{
+    syncLegacyStickReferences();
+    markAsChanged();
+    updateButtonList();
+    redraw();
+}
+
+function handleTemplatePageSelected(pageId)
+{
+    if (!pageId)
+    {
+        return;
+    }
+
+    currentPageId = pageId;
+
+    // Find the page and load its data
+    if (Array.isArray(templateData.pages))
+    {
+        const page = templateData.pages.find(p => p.id === pageId);
+        if (page)
+        {
+            // Update button list to show this page's buttons
+            updateButtonList();
+
+            // Clear selection when switching pages
+            selectButton(null);
+
+            // Load the page's image (or mirrored image) - this will call redraw when done
+            loadPageImage(page);
+        }
+    }
+}// Helper function to resize image to max width of 1024px while maintaining aspect ratio
+function resizeImage(img, maxWidth = 1024, callback)
+{
+    // If image is already smaller than maxWidth, use it as is
+    if (img.width <= maxWidth)
+    {
+        if (callback)
+        {
+            // Use setTimeout to make it async like the resize case
+            setTimeout(() => callback(img), 0);
+        }
+        return;
+    }
+
+    // Calculate new dimensions maintaining aspect ratio
+    const ratio = maxWidth / img.width;
+    const newWidth = maxWidth;
+    const newHeight = Math.round(img.height * ratio);
+
+    // Create a canvas to resize the image
+    const resizeCanvas = document.createElement('canvas');
+    resizeCanvas.width = newWidth;
+    resizeCanvas.height = newHeight;
+
+    const resizeCtx = resizeCanvas.getContext('2d');
+    resizeCtx.imageSmoothingEnabled = true;
+    resizeCtx.imageSmoothingQuality = 'high';
+
+    // Draw the resized image
+    resizeCtx.drawImage(img, 0, 0, newWidth, newHeight);
+
+    // Create a new image from the resized canvas
+    const resizedImg = new Image();
+    resizedImg.onload = () =>
+    {
+        if (callback)
+        {
+            callback(resizedImg);
+        }
+    };
+    resizedImg.src = resizeCanvas.toDataURL('image/png');
+}
+
+// Load image for a specific page (handles mirroring)
+function loadPageImage(page)
+{
+    if (!page) return;
+
+    const processImage = (imageDataUrl) =>
+    {
+        const img = new Image();
+
+        const handleImageLoad = () =>
+        {
+            resizeImage(img, 1024, (resizedImg) =>
+            {
+                loadedImage = resizedImg;
+                document.getElementById('canvas-overlay').classList.add('hidden');
+                redraw();
+            });
+        };
+
+        // Handle both cached and uncached images
+        img.onload = handleImageLoad;
+        img.src = imageDataUrl;
+
+        // For cached images, check after a microtask
+        setTimeout(() =>
+        {
+            if (img.complete && img.naturalWidth > 0)
+            {
+                handleImageLoad();
+            }
+        }, 0);
+    };
+
+    // Check if this page mirrors another page
+    if (page.mirror_from_page_id)
+    {
+        const mirrorPage = templateData.pages.find(p => p.id === page.mirror_from_page_id);
+        if (mirrorPage && mirrorPage.image_data_url)
+        {
+            processImage(mirrorPage.image_data_url);
+            return;
+        }
+    }
+
+    // Use this page's own image
+    if (page.image_data_url)
+    {
+        processImage(page.image_data_url);
+    }
+    else
+    {
+        // No image for this page
+        loadedImage = null;
+
+        // If the page has buttons, hide the overlay so they can be seen
+        // Otherwise show the overlay with the welcome message
+        const pageHasButtons = Array.isArray(page.buttons) && page.buttons.length > 0;
+        if (pageHasButtons)
+        {
+            document.getElementById('canvas-overlay').classList.add('hidden');
+        }
+        else
+        {
+            document.getElementById('canvas-overlay').classList.remove('hidden');
+        }
+
+        redraw();
+    }
+}
+
 // Joystick input detection
 let detectingInput = false;
 let inputDetectionTimeout = null; // Track timeout to clear it when restarting
@@ -96,6 +314,8 @@ window.initializeTemplateEditor = function ()
 
     // Load utilities first
     loadUtilities();
+
+    ensureTemplatePages();
 
     canvas = document.getElementById('editor-canvas');
     ctx = canvas.getContext('2d');
@@ -122,6 +342,13 @@ window.initializeTemplateEditor = function ()
     initializeEventListeners();
     loadPersistedTemplate();
 
+    initializeTemplatePagesUI({
+        template: templateData,
+        getTemplate: () => templateData,
+        onPagesChanged: handleTemplatePagesChanged,
+        onPageSelected: handleTemplatePageSelected
+    });
+
     // Update stick mapping display
     updateStickMappingDisplay();
 
@@ -136,9 +363,19 @@ window.initializeTemplateEditor = function ()
 
 function initializeEventListeners()
 {
-    // Stick selector buttons
-    document.getElementById('left-stick-btn').addEventListener('click', () => switchStick('left'));
-    document.getElementById('right-stick-btn').addEventListener('click', () => switchStick('right'));
+    // Page selector dropdown
+    const toolbarPageSelect = document.getElementById('toolbar-page-select');
+    if (toolbarPageSelect)
+    {
+        toolbarPageSelect.addEventListener('change', (e) =>
+        {
+            const pageId = e.target.value;
+            if (pageId)
+            {
+                handleTemplatePageSelected(pageId);
+            }
+        });
+    }
 
     document.getElementById('save-template-btn').addEventListener('click', saveTemplate);
     document.getElementById('save-template-as-btn').addEventListener('click', saveTemplateAs);
@@ -162,14 +399,7 @@ function initializeEventListeners()
         markAsChanged();
     });
 
-    document.getElementById('load-image-btn').addEventListener('click', loadImage);
-    document.getElementById('image-type-select').addEventListener('change', onImageTypeChange);
-    document.getElementById('image-flip-select').addEventListener('change', (e) =>
-    {
-        templateData.imageFlipped = e.target.value;
-        markAsChanged();
-        redraw();
-    });
+    // Legacy image controls removed - per-page images now handled in template page modal
     document.getElementById('new-template-btn').addEventListener('click', newTemplate);
     document.getElementById('add-button-btn').addEventListener('click', startAddButton);
     document.getElementById('delete-button-btn').addEventListener('click', deleteSelectedButton);
@@ -201,6 +431,7 @@ function initializeEventListeners()
     canvas.addEventListener('dblclick', onCanvasDoubleClick);
     canvas.addEventListener('mousemove', onCanvasMouseMove);
     canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
 
     // Global mouseup to catch releases outside canvas (fixes panning stuck bug)
     document.addEventListener('mouseup', onCanvasMouseUp);
@@ -252,7 +483,8 @@ function initializeEventListeners()
     document.getElementById('button-modal-clear').addEventListener('click', clearSimpleButtonInput);
 
     // Hidden file inputs
-    document.getElementById('image-file-input').addEventListener('change', onImageFileSelected);
+    // Legacy image file input - removed since per-page images are now handled in page modal
+    // Keep the element for backward compatibility if needed
 }
 
 function resizeCanvas()
@@ -277,7 +509,7 @@ function resizeCanvas()
 }
 
 // Stick switching
-function switchStick(stick)
+function switchStick(stick, skipRedraw = false)
 {
     if (currentStick === stick) return;
 
@@ -299,69 +531,51 @@ function switchStick(stick)
     console.log('Left stick buttons:', templateData.leftStick);
     console.log('Right stick buttons:', templateData.rightStick);
 
-    // Update button states
-    document.getElementById('left-stick-btn').classList.toggle('active', stick === 'left');
-    document.getElementById('right-stick-btn').classList.toggle('active', stick === 'right');
+    // Note: stick selector buttons removed - now using page selector dropdown
+    // This function is kept for backward compatibility but no longer updates UI buttons
 
-    // In dual image mode, load the correct image for the current stick
-    if (templateData.imageType === 'dual')
+    // Restore saved camera position for this stick
+    if (stick === 'left')
     {
-        if (stick === 'left' && templateData.leftImageDataUrl)
-        {
-            const img = new Image();
-            img.onload = () =>
-            {
-                loadedImage = img;
-                // Restore saved camera position
-                zoom = leftStickCamera.zoom;
-                pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
-                updateZoomDisplay();
-                redraw();
-            };
-            img.src = templateData.leftImageDataUrl;
-        }
-        else if (stick === 'right' && templateData.rightImageDataUrl)
-        {
-            const img = new Image();
-            img.onload = () =>
-            {
-                loadedImage = img;
-                // Restore saved camera position
-                zoom = rightStickCamera.zoom;
-                pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
-                updateZoomDisplay();
-                redraw();
-            };
-            img.src = templateData.rightImageDataUrl;
-        }
+        zoom = leftStickCamera.zoom;
+        pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
     }
     else
     {
-        // In single image mode, just restore the camera position for this stick
-        if (stick === 'left')
-        {
-            zoom = leftStickCamera.zoom;
-            pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
-        }
-        else
-        {
-            zoom = rightStickCamera.zoom;
-            pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
-        }
-        updateZoomDisplay();
+        zoom = rightStickCamera.zoom;
+        pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
     }
+    updateZoomDisplay();
 
     // Clear selection
     selectButton(null);
 
-    // Update button list and redraw
+    // Update button list and redraw (unless told to skip redraw)
     updateButtonList();
-    redraw();
+    if (!skipRedraw)
+    {
+        redraw();
+    }
 }
 
 // Get current stick's button array
 function getCurrentButtons()
 {
+    // If using TemplateV2 pages and a page is selected, use that
+    if (currentPageId && Array.isArray(templateData.pages))
+    {
+        const page = templateData.pages.find(p => p.id === currentPageId);
+        if (page)
+        {
+            if (!Array.isArray(page.buttons))
+            {
+                page.buttons = [];
+            }
+            return page.buttons;
+        }
+    }
+
+    // Fallback to legacy stick-based logic
     if (currentStick === 'left')
     {
         // Handle nested structure: { joystickNumber: 1, buttons: [...] }
@@ -402,22 +616,47 @@ function getCurrentButtons()
 
 function getCurrentStickData()
 {
+    // If using TemplateV2 pages and a page is selected, return that page
+    if (currentPageId && Array.isArray(templateData.pages))
+    {
+        const page = templateData.pages.find(p => p.id === currentPageId);
+        if (page)
+        {
+            return page;
+        }
+    }
+
+    // Fallback to legacy stick data
     return currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
+}
+
+// Get current page (for TemplateV2)
+function getCurrentPage()
+{
+    if (currentPageId && Array.isArray(templateData.pages))
+    {
+        return templateData.pages.find(p => p.id === currentPageId);
+    }
+    return null;
 }
 
 function getCurrentStickJoystickNumber()
 {
     const stickData = getCurrentStickData();
+
+    // For pages, use the joystickNumber field (same as stick data)
     if (stickData && stickData.joystickNumber)
     {
         return stickData.joystickNumber;
     }
 
+    // Fallback to global joystick number
     if (templateData.joystickNumber)
     {
         return templateData.joystickNumber;
     }
 
+    // Final fallback based on current stick
     return currentStick === 'left' ? 1 : 2;
 }
 
@@ -592,6 +831,19 @@ function updateSimpleInputPreview(button = null)
 // Set current stick's button array
 function setCurrentButtons(buttons)
 {
+    // If using TemplateV2 pages and a page is selected, use that
+    if (currentPageId && Array.isArray(templateData.pages))
+    {
+        const page = templateData.pages.find(p => p.id === currentPageId);
+        if (page)
+        {
+            page.buttons = buttons;
+            syncLegacyStickReferences();
+            return;
+        }
+    }
+
+    // Fallback to legacy stick-based logic
     if (currentStick === 'left')
     {
         // Handle nested structure
@@ -622,7 +874,7 @@ function setCurrentButtons(buttons)
 async function newTemplate()
 {
     if ((templateData.name ||
-        templateData.imagePath ||
+        templateData.pages.length > 0 ||
         templateData.leftStick.buttons.length > 0 ||
         templateData.rightStick.buttons.length > 0))
     {
@@ -651,25 +903,19 @@ async function newTemplate()
         name: '',
         joystickModel: '',
         joystickNumber: 2,
-        imagePath: '',
-        imageDataUrl: null,
-        imageFlipped: 'right',
-        imageType: 'single',
-        leftImagePath: '',
-        leftImageDataUrl: null,
-        rightImagePath: '',
-        rightImageDataUrl: null,
         leftStick: { joystickNumber: 1, buttons: [] },
-        rightStick: { joystickNumber: 2, buttons: [] }
+        rightStick: { joystickNumber: 2, buttons: [] },
+        version: '1.0',
+        pages: []
     };
+
+    ensureTemplatePages();
+    refreshTemplatePagesUI(templateData);
 
     // Reset UI
     document.getElementById('template-name').value = '';
     document.getElementById('joystick-model').value = '';
     updateStickMappingDisplay();
-    document.getElementById('image-flip-select').value = 'right';
-    document.getElementById('image-type-select').value = 'single';
-    document.getElementById('image-info').textContent = '';
 
     // Hide overlay message
     document.getElementById('canvas-overlay').classList.remove('hidden');
@@ -705,109 +951,7 @@ async function newTemplate()
 }
 
 // Handle image type selection
-function onImageTypeChange()
-{
-    const imageType = document.getElementById('image-type-select').value;
-    templateData.imageType = imageType;
-
-    if (imageType === 'single')
-    {
-        // Single image mode - show mirror selector
-        document.getElementById('image-flip-select').parentElement.style.display = 'block';
-    }
-    else
-    {
-        // Dual image mode - hide mirror selector
-        document.getElementById('image-flip-select').parentElement.style.display = 'none';
-        templateData.imageFlipped = 'none';
-        document.getElementById('image-flip-select').value = 'none';
-    }
-
-    markAsChanged();
-    updateButtonList();
-    redraw();
-}
-
-// Image loading
-async function loadImage()
-{
-    // In dual image mode, the image will be loaded for the current stick
-    // No need for a dialog - just open the file picker
-    document.getElementById('image-file-input').click();
-}
-
-function onImageFileSelected(e)
-{
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) =>
-    {
-        const img = new Image();
-        img.onload = () =>
-        {
-            // Handle based on image type
-            if (templateData.imageType === 'dual')
-            {
-                // Store image for current stick
-                if (currentStick === 'left')
-                {
-                    loadedImage = img;
-                    templateData.leftImagePath = file.name;
-                    templateData.leftImageDataUrl = event.target.result;
-                    document.getElementById('image-info').textContent =
-                        `Left: ${file.name} (${img.width}×${img.height})`;
-                }
-                else
-                {
-                    // For right stick in dual mode
-                    loadedImage = img;
-                    templateData.rightImagePath = file.name;
-                    templateData.rightImageDataUrl = event.target.result;
-                    document.getElementById('image-info').textContent =
-                        `Right: ${file.name} (${img.width}×${img.height})`;
-                }
-            }
-            else
-            {
-                // Single image mode
-                loadedImage = img;
-                templateData.imagePath = file.name;
-                templateData.imageDataUrl = event.target.result;
-                document.getElementById('image-info').textContent =
-                    `${file.name} (${img.width}×${img.height})`;
-            }
-
-            // Hide overlay
-            document.getElementById('canvas-overlay').classList.add('hidden');
-
-            // Mark as changed to persist data
-            markAsChanged();
-
-            // Ensure canvas is properly sized, then fit image to screen
-            resizeCanvas();
-            requestAnimationFrame(() =>
-            {
-                fitToScreen();
-                // Save the initial camera position after centering
-                if (currentStick === 'left')
-                {
-                    leftStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
-                }
-                else
-                {
-                    rightStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
-                }
-            });
-        };
-        img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-
-    // Clear the input so the same file can be loaded again
-    e.target.value = '';
-}
+// Legacy image loading functions removed - per-page images now handled in template page modal
 
 // Drawing functions
 function redraw()
@@ -821,27 +965,14 @@ function redraw()
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Get the image to display based on mode
-    let displayImage = null;
-    if (templateData.imageType === 'dual')
+    // Determine if image should be flipped (page-based mirroring only)
+    let shouldFlip = false;
+    const currentPage = getCurrentPage();
+    if (currentPage)
     {
-        // In dual mode, load the appropriate image for current stick
-        if (currentStick === 'left' && templateData.leftImageDataUrl)
-        {
-            displayImage = loadedImage;
-        }
-        else if (currentStick === 'right' && templateData.rightImageDataUrl)
-        {
-            displayImage = loadedImage;
-        }
+        // Check if this page mirrors another page (flip required)
+        shouldFlip = !!currentPage.mirror_from_page_id;
     }
-    else
-    {
-        // Single image mode
-        displayImage = loadedImage;
-    }
-
-    if (!displayImage) return;
 
     ctx.save();
 
@@ -852,25 +983,28 @@ function redraw()
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
-    // Enable smooth image rendering
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-
-    // Draw image with optional flip based on current stick and imageFlipped setting
-    ctx.save();
-    const shouldFlip = templateData.imageFlipped !== 'none' && currentStick === templateData.imageFlipped;
-
-    if (shouldFlip)
+    // Draw image if available
+    if (loadedImage)
     {
-        ctx.translate(displayImage.width, 0);
-        ctx.scale(-1, 1);
+        // Enable smooth image rendering
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        // Draw image with optional flip based on mirroring settings
+        ctx.save();
+
+        if (shouldFlip)
+        {
+            ctx.translate(loadedImage.width, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(loadedImage, 0, 0);
+        ctx.restore();
     }
-    ctx.drawImage(displayImage, 0, 0);
-    ctx.restore();
 
     // Draw all buttons for current stick (without flip)
+    // This works even if there's no background image
     const buttons = getCurrentButtons();
-    console.log('Drawing buttons for', currentStick, ':', buttons.length, 'buttons');
     if (Array.isArray(buttons))
     {
         buttons.forEach(button =>
@@ -887,6 +1021,15 @@ function redraw()
 
     ctx.restore();
 }
+
+// Expose redraw globally for use by template-editor-v2.js
+window.redraw = redraw;
+
+// Expose function to update loadedImage from external modules
+window.setLoadedImage = function (img)
+{
+    loadedImage = img;
+};
 
 function drawButton(button, isTemp = false)
 {
@@ -999,12 +1142,10 @@ function getCanvasCoords(event)
 
 function onCanvasMouseDown(event)
 {
-    if (!loadedImage) return;
-
     const coords = getCanvasCoords(event);
 
-    // Middle click for panning
-    if (event.button === 1)
+    // Middle click or right click for panning
+    if (event.button === 1 || event.button === 2)
     {
         isPanning = true;
         lastPanPosition = { x: event.clientX, y: event.clientY };
@@ -1013,8 +1154,11 @@ function onCanvasMouseDown(event)
         return;
     }
 
-    // Only handle left click for button operations
+    // Only handle left click for button operations below this point
     if (event.button !== 0) return;
+
+    // Need an image to work with buttons
+    if (!loadedImage) return;
 
     if (mode === 'view')
     {
@@ -1413,21 +1557,9 @@ function highlightConfigureButton()
 
 function highlightLoadImageButton()
 {
-    const loadImageBtn = document.getElementById('load-image-btn');
-
-    if (!loadImageBtn) return;
-
-    // Add highlight animation class
-    loadImageBtn.classList.add('highlight-pulse');
-
-    // Scroll the button into view smoothly
-    loadImageBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    // Remove animation after 3 seconds
-    setTimeout(() =>
-    {
-        loadImageBtn.classList.remove('highlight-pulse');
-    }, 3000);
+    // Legacy function - image loading now happens in page modal
+    // This function is kept for compatibility but does nothing
+    return;
 }
 
 
@@ -1503,6 +1635,18 @@ async function clearAllButtons()
     const buttons = getCurrentButtons();
     if (buttons.length === 0) return;
 
+    // Get current page name for better messaging
+    let pageName = 'current page';
+    const currentPage = getCurrentPage();
+    if (currentPage && currentPage.name)
+    {
+        pageName = `"${currentPage.name}"`;
+    }
+    else if (!currentPage)
+    {
+        // Legacy mode - use stick name
+        pageName = `${currentStick} stick`;
+    }
 
     const showConfirmation = window.showConfirmation;
     if (!showConfirmation)
@@ -1512,7 +1656,7 @@ async function clearAllButtons()
     }
 
     const confirmed = await showConfirmation(
-        'Are you sure you want to clear all buttons? This cannot be undone.',
+        `Are you sure you want to clear all ${buttons.length} button(s) from ${pageName}? This cannot be undone.`,
         'Clear All Buttons',
         'Clear All',
         'Cancel',
@@ -1530,44 +1674,131 @@ async function clearAllButtons()
 
 async function mirrorTemplate()
 {
-    if (!loadedImage)
+    // Check if we have pages to mirror
+    if (!templateData.pages || templateData.pages.length < 2)
     {
-        await window.showAlert('Please load an image first', 'Load Image First');
+        await window.showAlert('You need at least 2 pages to use the mirror feature.', 'Not Enough Pages');
         return;
     }
 
-    if (templateData.imageFlipped === 'none')
+    // Show mirror modal
+    const modal = document.getElementById('mirror-template-modal');
+    const sourceSelect = document.getElementById('mirror-source-page-select');
+    const destSelect = document.getElementById('mirror-dest-page-select');
+    const confirmBtn = document.getElementById('mirror-template-confirm-btn');
+    const cancelBtn = document.getElementById('mirror-template-cancel-btn');
+
+    // Populate dropdowns with pages
+    sourceSelect.innerHTML = '<option value="">-- Select a page --</option>';
+    destSelect.innerHTML = '<option value="">-- Select a page --</option>';
+
+    templateData.pages.forEach(page =>
     {
-        await window.showAlert('Cannot mirror template in dual image mode or when mirroring is disabled', 'Mirror Disabled');
+        const option1 = document.createElement('option');
+        option1.value = page.id;
+        option1.textContent = page.name || `Page ${page.id}`;
+        sourceSelect.appendChild(option1);
+
+        const option2 = document.createElement('option');
+        option2.value = page.id;
+        option2.textContent = page.name || `Page ${page.id}`;
+        destSelect.appendChild(option2);
+    });
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Wait for user action
+    const result = await new Promise(resolve =>
+    {
+        const handleConfirm = () =>
+        {
+            const sourcePageId = sourceSelect.value;
+            const destPageId = destSelect.value;
+
+            if (!sourcePageId || !destPageId)
+            {
+                window.showAlert('Please select both a source and destination page.', 'Selection Required');
+                return;
+            }
+
+            if (sourcePageId === destPageId)
+            {
+                window.showAlert('Source and destination pages must be different.', 'Invalid Selection');
+                return;
+            }
+
+            cleanup();
+            resolve({ sourcePageId, destPageId });
+        };
+
+        const handleCancel = () =>
+        {
+            cleanup();
+            resolve(null);
+        };
+
+        const cleanup = () =>
+        {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            modal.style.display = 'none';
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    });
+
+    if (!result) return;
+
+    // Find source and destination pages
+    const sourcePage = templateData.pages.find(p => p.id === result.sourcePageId);
+    const destPage = templateData.pages.find(p => p.id === result.destPageId);
+
+    if (!sourcePage || !destPage)
+    {
+        await window.showAlert('Could not find selected pages.', 'Error');
         return;
     }
 
-    // Show custom confirmation with direction options
-    const stickName = currentStick === 'left' ? 'Left' : 'Right';
-    const otherStick = currentStick === 'left' ? 'Right' : 'Left';
+    // Get the image width for mirroring
+    let imageWidth = null;
 
-    const confirmed = await window.showConfirmation(
-        `Mirror ${stickName} stick buttons to ${otherStick} stick?\n\nThis will copy and flip all button positions for the current stick to the other stick horizontally.`,
-        'Mirror Template',
-        `Mirror ${stickName} → ${otherStick}`,
-        'Cancel',
-        'btn-secondary'
-    );
-
-    if (!confirmed)
+    // Try to get image width from source page
+    if (sourcePage.image_data_url)
     {
-        return;
+        const img = new Image();
+        img.src = sourcePage.image_data_url;
+        await new Promise(resolve => { img.onload = resolve; });
+        imageWidth = img.width;
+    }
+    else if (sourcePage.mirror_from_page_id)
+    {
+        // Source page mirrors another page, get that page's image
+        const mirrorPage = templateData.pages.find(p => p.id === sourcePage.mirror_from_page_id);
+        if (mirrorPage && mirrorPage.image_data_url)
+        {
+            const img = new Image();
+            img.src = mirrorPage.image_data_url;
+            await new Promise(resolve => { img.onload = resolve; });
+            imageWidth = img.width;
+        }
     }
 
-    // Determine source and destination sticks
-    const sourceStick = currentStick;
-    const sourceData = currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
-    const destStick = currentStick === 'left' ? 'right' : 'left';
-    const destData = currentStick === 'left' ? templateData.rightStick : templateData.leftStick;
+    if (!imageWidth)
+    {
+        await window.showAlert('Source page does not have an image loaded.', 'No Image');
+        return;
+    }
 
     // Mirror all button positions from source to destination
-    const imageWidth = loadedImage.width;
-    const sourceButtons = sourceData.buttons;
+    const sourceButtons = sourcePage.buttons || [];
+
+    if (sourceButtons.length === 0)
+    {
+        await window.showAlert('Source page has no buttons to mirror.', 'No Buttons');
+        return;
+    }
 
     // Create mirrored copies of all buttons
     const mirroredButtons = sourceButtons.map(button =>
@@ -1587,16 +1818,20 @@ async function mirrorTemplate()
         return mirroredButton;
     });
 
-    // Replace destination stick buttons with mirrored copies
-    destData.buttons = mirroredButtons;
+    // Replace destination page buttons with mirrored copies
+    destPage.buttons = mirroredButtons;
 
     markAsChanged();
+    syncLegacyStickReferences();
 
-    // Switch to destination stick to show the mirrored result
-    switchStick(destStick);
+    // Switch to destination page to show the mirrored result
+    if (window.handleTemplatePageSelected)
+    {
+        window.handleTemplatePageSelected(destPage.id);
+    }
 
     await window.showAlert(
-        `Successfully mirrored ${stickName} stick buttons to ${otherStick} stick!`,
+        `Successfully mirrored ${sourceButtons.length} button(s) from "${sourcePage.name}" to "${destPage.name}"!`,
         'Mirror Complete'
     );
 }
@@ -2559,16 +2794,9 @@ async function saveTemplate()
         const saveData = {
             name: templateData.name,
             joystickModel: templateData.joystickModel,
-            imagePath: templateData.imagePath,
-            imageDataUrl: templateData.imageDataUrl,
-            imageFlipped: templateData.imageFlipped, // 'left', 'right', or 'none'
-            imageType: templateData.imageType, // 'single' or 'dual'
-            leftImagePath: templateData.leftImagePath,
-            leftImageDataUrl: templateData.leftImageDataUrl,
-            rightImagePath: templateData.rightImagePath,
-            rightImageDataUrl: templateData.rightImageDataUrl,
-            imageWidth: loadedImage.width,
-            imageHeight: loadedImage.height,
+            version: templateData.version || '1.0',
+            imageWidth: loadedImage ? loadedImage.width : 0,
+            imageHeight: loadedImage ? loadedImage.height : 0,
             leftStick: {
                 joystickNumber: templateData.leftStick.joystickNumber || 1,
                 buttons: getStickButtons(templateData.leftStick).map(b => ({
@@ -2596,7 +2824,29 @@ async function saveTemplate()
                     inputType: b.inputType,
                     inputId: b.inputId
                 }))
-            }
+            },
+            pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
+                id: page.id,
+                name: page.name || 'Untitled Page',
+                device_uuid: page.device_uuid || '',
+                device_name: page.device_name || '',
+                joystickNumber: page.joystickNumber || 1,
+                axis_profile: page.axis_profile || 'default',
+                axis_mapping: page.axis_mapping || {},
+                image_path: page.image_path || '',
+                image_data_url: page.image_data_url || null,
+                mirror_from_page_id: page.mirror_from_page_id || '',
+                buttons: (page.buttons || []).map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    buttonPos: b.buttonPos,
+                    labelPos: b.labelPos,
+                    buttonType: b.buttonType || 'simple',
+                    inputs: b.inputs || {},
+                    inputType: b.inputType,
+                    inputId: b.inputId
+                }))
+            })) : []
         };
 
         await invoke('save_template', {
@@ -2703,16 +2953,9 @@ async function saveTemplateAs()
         const saveData = {
             name: templateData.name,
             joystickModel: templateData.joystickModel,
-            imagePath: templateData.imagePath,
-            imageDataUrl: templateData.imageDataUrl,
-            imageFlipped: templateData.imageFlipped,
-            imageType: templateData.imageType,
-            leftImagePath: templateData.leftImagePath,
-            leftImageDataUrl: templateData.leftImageDataUrl,
-            rightImagePath: templateData.rightImagePath,
-            rightImageDataUrl: templateData.rightImageDataUrl,
-            imageWidth: loadedImage.width,
-            imageHeight: loadedImage.height,
+            version: templateData.version || '1.0',
+            imageWidth: loadedImage ? loadedImage.width : 0,
+            imageHeight: loadedImage ? loadedImage.height : 0,
             leftStick: {
                 joystickNumber: templateData.leftStick.joystickNumber || 1,
                 buttons: getStickButtons(templateData.leftStick).map(b => ({
@@ -2740,7 +2983,29 @@ async function saveTemplateAs()
                     inputType: b.inputType,
                     inputId: b.inputId
                 }))
-            }
+            },
+            pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
+                id: page.id,
+                name: page.name || 'Untitled Page',
+                device_uuid: page.device_uuid || '',
+                device_name: page.device_name || '',
+                joystickNumber: page.joystickNumber || 1,
+                axis_profile: page.axis_profile || 'default',
+                axis_mapping: page.axis_mapping || {},
+                image_path: page.image_path || '',
+                image_data_url: page.image_data_url || null,
+                mirror_from_page_id: page.mirror_from_page_id || '',
+                buttons: (page.buttons || []).map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    buttonPos: b.buttonPos,
+                    labelPos: b.labelPos,
+                    buttonType: b.buttonType || 'simple',
+                    inputs: b.inputs || {},
+                    inputType: b.inputType,
+                    inputId: b.inputId
+                }))
+            })) : []
         };
 
         await invoke('save_template', {
@@ -2750,8 +3015,8 @@ async function saveTemplateAs()
 
         // Persist to localStorage
         localStorage.setItem('currentTemplate', JSON.stringify(saveData));
-        const fileName = filePath.split(/[\\\/]/).pop();
-        localStorage.setItem('templateFileName', fileName);
+        const fileNameAs = filePath.split(/[\\\/]/).pop();
+        localStorage.setItem('templateFileName', fileNameAs);
 
         // Clear unsaved changes
         hasUnsavedChanges = false;
@@ -2760,7 +3025,7 @@ async function saveTemplateAs()
         // Update header template name
         if (window.updateTemplateIndicator)
         {
-            window.updateTemplateIndicator(templateData.name, fileName);
+            window.updateTemplateIndicator(templateData.name, fileNameAs);
         }
 
         await showAlert('Template saved successfully!', 'Template Saved');
@@ -2803,29 +3068,6 @@ async function loadTemplate()
         templateData.name = data.name || '';
         templateData.joystickModel = data.joystickModel || '';
         templateData.joystickNumber = data.joystickNumber || 1;
-        templateData.imagePath = data.imagePath || '';
-        templateData.imageDataUrl = data.imageDataUrl || null;
-
-        // Handle imageType (new field)
-        templateData.imageType = data.imageType || 'single';
-
-        // Handle dual image data
-        templateData.leftImagePath = data.leftImagePath || '';
-        templateData.leftImageDataUrl = data.leftImageDataUrl || null;
-        templateData.rightImagePath = data.rightImagePath || '';
-        templateData.rightImageDataUrl = data.rightImageDataUrl || null;
-
-        // Handle imageFlipped: convert old boolean format to new format
-        if (typeof data.imageFlipped === 'boolean')
-        {
-            // Old format: true means flipped, assume it was for left stick
-            templateData.imageFlipped = data.imageFlipped ? 'left' : 'right';
-        }
-        else
-        {
-            // New format: 'left', 'right', or 'none'
-            templateData.imageFlipped = data.imageFlipped || 'right';
-        }
 
         // Handle buttons: support multiple formats
         // Format 1: New nested format { leftStick: { joystickNumber: 1, buttons: [...] }, rightStick: { joystickNumber: 2, buttons: [...] } }
@@ -2860,6 +3102,10 @@ async function loadTemplate()
             templateData.leftStick = { joystickNumber: 1, buttons: [] };
             templateData.rightStick = { joystickNumber: 2, buttons: [] };
         }
+        templateData.version = data.version || '1.0';
+        templateData.pages = Array.isArray(data.pages) ? data.pages : [];
+        ensureTemplatePages();
+        refreshTemplatePagesUI(templateData);
 
         // Persist to localStorage
         localStorage.setItem('currentTemplate', JSON.stringify(data));
@@ -2887,43 +3133,26 @@ async function loadTemplate()
         document.getElementById('template-name').value = templateData.name;
         document.getElementById('joystick-model').value = templateData.joystickModel;
         updateStickMappingDisplay();
-        document.getElementById('image-type-select').value = templateData.imageType;
-        document.getElementById('image-flip-select').value = templateData.imageFlipped;
 
-        // Update UI visibility based on image type
-        if (templateData.imageType === 'dual')
+        // Load the first page's image if we have pages
+        if (currentPageId && templateData.pages.length > 0)
         {
-            document.getElementById('image-flip-select').parentElement.style.display = 'none';
-        }
-        else
-        {
-            document.getElementById('image-flip-select').parentElement.style.display = 'block';
-        }
-
-        // Load the image(s)
-        if (templateData.imageType === 'dual')
-        {
-            // Load dual images
-            if (templateData.leftImageDataUrl)
+            const firstPage = templateData.pages.find(p => p.id === currentPageId);
+            if (firstPage)
             {
-                const img = new Image();
-                img.src = templateData.leftImageDataUrl;
+                loadPageImage(firstPage);
+                updateButtonList();
             }
-            if (templateData.rightImageDataUrl)
+        }
+        // Legacy image handling for backward compatibility (only if no pages)
+        else if (templateData.imageType === 'dual' && templateData.leftImageDataUrl)
+        {
+            const img = new Image();
+            img.onload = () =>
             {
-                const img = new Image();
-                img.src = templateData.rightImageDataUrl;
-            }
-            document.getElementById('image-info').textContent =
-                `Left: ${templateData.leftImagePath}, Right: ${templateData.rightImagePath}`;
-
-            // Load the left image first for display
-            if (templateData.leftImageDataUrl)
-            {
-                const img = new Image();
-                img.onload = () =>
+                resizeImage(img, 1024, (resizedImg) =>
                 {
-                    loadedImage = img;
+                    loadedImage = resizedImg;
                     document.getElementById('canvas-overlay').classList.add('hidden');
                     resizeCanvas();
                     requestAnimationFrame(() =>
@@ -2931,31 +3160,28 @@ async function loadTemplate()
                         fitToScreen();
                         updateButtonList();
                     });
-                };
-                img.src = templateData.leftImageDataUrl;
-            }
+                });
+            };
+            img.src = templateData.leftImageDataUrl;
         }
-        else
+        else if (templateData.imageDataUrl)
         {
-            // Single image mode
-            if (templateData.imageDataUrl)
+            const img = new Image();
+            img.onload = () =>
             {
-                const img = new Image();
-                img.onload = () =>
+                resizeImage(img, 1024, (resizedImg) =>
                 {
-                    loadedImage = img;
+                    loadedImage = resizedImg;
                     document.getElementById('canvas-overlay').classList.add('hidden');
-                    document.getElementById('image-info').textContent =
-                        `${templateData.imagePath} (${img.width}×${img.height})`;
                     resizeCanvas();
                     requestAnimationFrame(() =>
                     {
                         fitToScreen();
                         updateButtonList();
                     });
-                };
-                img.src = templateData.imageDataUrl;
-            }
+                });
+            };
+            img.src = templateData.imageDataUrl;
         }
 
     } catch (error)
@@ -3131,67 +3357,64 @@ function loadPersistedTemplate()
                 templateData.rightStick = { joystickNumber: 2, buttons: [] };
             }
 
+            templateData.version = data.version || '1.0';
+            templateData.pages = Array.isArray(data.pages) ? data.pages : [];
+            ensureTemplatePages();
+            refreshTemplatePagesUI(templateData);
+
             // Update UI
             document.getElementById('template-name').value = templateData.name;
             document.getElementById('joystick-model').value = templateData.joystickModel;
             updateStickMappingDisplay();
-            document.getElementById('image-type-select').value = templateData.imageType;
-            document.getElementById('image-flip-select').value = templateData.imageFlipped;
 
-            // Update UI visibility based on image type
-            if (templateData.imageType === 'dual')
+            // Load the first page's image if we have pages
+            if (currentPageId && templateData.pages.length > 0)
             {
-                document.getElementById('image-flip-select').parentElement.style.display = 'none';
-            }
-            else
-            {
-                document.getElementById('image-flip-select').parentElement.style.display = 'block';
-            }
-
-            // Load the image(s)
-            if (templateData.imageType === 'dual')
-            {
-                // Load the left image for display
-                if (templateData.leftImageDataUrl)
+                const firstPage = templateData.pages.find(p => p.id === currentPageId);
+                if (firstPage)
                 {
-                    const img = new Image();
-                    img.onload = () =>
+                    loadPageImage(firstPage);
+                    updateButtonList();
+                }
+            }
+            // Legacy image handling for backward compatibility (only if no pages)
+            else if (templateData.imageType === 'dual' && templateData.leftImageDataUrl)
+            {
+                const img = new Image();
+                img.onload = () =>
+                {
+                    resizeImage(img, 1024, (resizedImg) =>
                     {
-                        loadedImage = img;
+                        loadedImage = resizedImg;
                         document.getElementById('canvas-overlay').classList.add('hidden');
-                        document.getElementById('image-info').textContent =
-                            `Left: ${templateData.leftImagePath}, Right: ${templateData.rightImagePath}`;
                         resizeCanvas();
                         requestAnimationFrame(() =>
                         {
                             fitToScreen();
                             updateButtonList();
                         });
-                    };
-                    img.src = templateData.leftImageDataUrl;
-                }
+                    });
+                };
+                img.src = templateData.leftImageDataUrl;
             }
-            else
+            else if (templateData.imageDataUrl)
             {
-                // Single image mode
-                if (templateData.imageDataUrl)
+                const img = new Image();
+                img.onload = () =>
                 {
-                    const img = new Image();
-                    img.onload = () =>
+                    resizeImage(img, 1024, (resizedImg) =>
                     {
-                        loadedImage = img;
+                        loadedImage = resizedImg;
                         document.getElementById('canvas-overlay').classList.add('hidden');
-                        document.getElementById('image-info').textContent =
-                            `${templateData.imagePath} (${img.width}×${img.height})`;
                         resizeCanvas();
                         requestAnimationFrame(() =>
                         {
                             fitToScreen();
                             updateButtonList();
                         });
-                    };
-                    img.src = templateData.imageDataUrl;
-                }
+                    });
+                };
+                img.src = templateData.imageDataUrl;
             }
         }
     } catch (error)
@@ -3217,6 +3440,8 @@ function markAsChanged()
         console.error('Error persisting template changes:', error);
     }
 }
+
+window.markTemplateAsChanged = markAsChanged;
 
 // ============================================================================
 // TEMPLATE JOYSTICK MAPPING
