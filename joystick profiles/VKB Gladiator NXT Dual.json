@@ -186,8 +186,8 @@
           "y": 860
         },
         "labelPos": {
-          "x": 850,
-          "y": 860
+          "x": 860,
+          "y": 730
         },
         "buttonType": "simple",
         "inputs": {
@@ -202,8 +202,8 @@
           "y": 860
         },
         "labelPos": {
-          "x": 850,
-          "y": 990
+          "x": 860,
+          "y": 860
         },
         "buttonType": "simple",
         "inputs": {
@@ -219,7 +219,7 @@
         },
         "labelPos": {
           "x": 80,
-          "y": 860
+          "y": 730
         },
         "buttonType": "simple",
         "inputs": {
@@ -235,7 +235,7 @@
         },
         "labelPos": {
           "x": 80,
-          "y": 990
+          "y": 860
         },
         "buttonType": "simple",
         "inputs": {
@@ -355,7 +355,7 @@
     "joystickNumber": 1,
     "buttons": [
       {
-        "id": 1763294614206.244,
+        "id": 1763336709351.1682,
         "name": "Left Hat",
         "buttonPos": {
           "x": 584,
@@ -375,7 +375,7 @@
         }
       },
       {
-        "id": 1763294614206.916,
+        "id": 1763336709351.5864,
         "name": "Right Hat",
         "buttonPos": {
           "x": 474,
@@ -394,7 +394,7 @@
         }
       },
       {
-        "id": 1763294614206.496,
+        "id": 1763336709351.872,
         "name": "Red Button",
         "buttonPos": {
           "x": 454,
@@ -410,7 +410,7 @@
         }
       },
       {
-        "id": 1763294614206.432,
+        "id": 1763336709351.4487,
         "name": "Trigger",
         "buttonPos": {
           "x": 554,
@@ -426,7 +426,7 @@
         }
       },
       {
-        "id": 1763294614206.7617,
+        "id": 1763336709351.1897,
         "name": "Rocker Switch Up",
         "buttonPos": {
           "x": 554,
@@ -442,7 +442,7 @@
         }
       },
       {
-        "id": 1763294614206.7065,
+        "id": 1763336709351.802,
         "name": "Rocker Switch Down",
         "buttonPos": {
           "x": 554,
@@ -458,7 +458,7 @@
         }
       },
       {
-        "id": 1763294614206.7656,
+        "id": 1763336709351.2842,
         "name": "Side Hat",
         "buttonPos": {
           "x": 464,
@@ -478,7 +478,7 @@
         }
       },
       {
-        "id": 1763294614206.3433,
+        "id": 1763336709351.1155,
         "name": "F3",
         "buttonPos": {
           "x": 464,
@@ -494,7 +494,7 @@
         }
       },
       {
-        "id": 1763294614206.6907,
+        "id": 1763336709351.3672,
         "name": "F1",
         "buttonPos": {
           "x": 554,
@@ -510,7 +510,7 @@
         }
       },
       {
-        "id": 1763294614206.0002,
+        "id": 1763336709351.9443,
         "name": "F2",
         "buttonPos": {
           "x": 644,
@@ -526,15 +526,15 @@
         }
       },
       {
-        "id": 1763294614206.6152,
+        "id": 1763336709351.781,
         "name": "Right Encoder Up",
         "buttonPos": {
           "x": 454,
           "y": 860
         },
         "labelPos": {
-          "x": 174,
-          "y": 860
+          "x": 164,
+          "y": 730
         },
         "buttonType": "simple",
         "inputs": {
@@ -542,15 +542,15 @@
         }
       },
       {
-        "id": 1763294614206.4058,
+        "id": 1763336709351.749,
         "name": "Right Encoder Down",
         "buttonPos": {
           "x": 454,
           "y": 860
         },
         "labelPos": {
-          "x": 174,
-          "y": 990
+          "x": 164,
+          "y": 860
         },
         "buttonType": "simple",
         "inputs": {
@@ -558,7 +558,7 @@
         }
       },
       {
-        "id": 1763294614206.9775,
+        "id": 1763336709351.9958,
         "name": "Left Encoder Up",
         "buttonPos": {
           "x": 654,
@@ -566,7 +566,7 @@
         },
         "labelPos": {
           "x": 944,
-          "y": 860
+          "y": 730
         },
         "buttonType": "simple",
         "inputs": {
@@ -574,7 +574,7 @@
         }
       },
       {
-        "id": 1763294614206.793,
+        "id": 1763336709351.152,
         "name": "Left Encoder Down",
         "buttonPos": {
           "x": 654,
@@ -582,7 +582,7 @@
         },
         "labelPos": {
           "x": 944,
-          "y": 990
+          "y": 860
         },
         "buttonType": "simple",
         "inputs": {
@@ -590,7 +590,7 @@
         }
       },
       {
-        "id": 1763294614206.1987,
+        "id": 1763336709351.494,
         "name": "Side Button",
         "buttonPos": {
           "x": 424,
@@ -606,7 +606,7 @@
         }
       },
       {
-        "id": 1763294614206.026,
+        "id": 1763336709351.2434,
         "name": "Middle Hat",
         "buttonPos": {
           "x": 524,
@@ -625,7 +625,7 @@
         }
       },
       {
-        "id": 1763294614206.7898,
+        "id": 1763336709351.622,
         "name": "Y Axis",
         "buttonPos": {
           "x": 554,
@@ -643,7 +643,7 @@
         "inputId": "y"
       },
       {
-        "id": 1763294614206.2322,
+        "id": 1763336709351.7825,
         "name": "X Axis",
         "buttonPos": {
           "x": 554,
@@ -661,7 +661,7 @@
         "inputId": "x"
       },
       {
-        "id": 1763294614206.9124,
+        "id": 1763336709351.7808,
         "name": "Rot Z",
         "buttonPos": {
           "x": 554,
@@ -679,7 +679,7 @@
         "inputId": "rotz"
       },
       {
-        "id": 1763294614206.168,
+        "id": 1763336709351.6726,
         "name": "Slider",
         "buttonPos": {
           "x": 554,
@@ -703,7 +703,7 @@
       "id": "bb4c950c-ff65-4f75-a0a4-cdf4d585f5da",
       "name": "Left Stick",
       "device_uuid": "030000001d2300000102000000000000",
-      "device_name": "VKB Gladiator NXT R (Left)",
+      "device_name": "VKB Gladiator NXT (Left)",
       "joystickNumber": 2,
       "axis_profile": "VKB Gladiator NXT",
       "axis_mapping": {
@@ -896,8 +896,8 @@
             "y": 860
           },
           "labelPos": {
-            "x": 850,
-            "y": 860
+            "x": 860,
+            "y": 730
           },
           "buttonType": "simple",
           "inputs": {
@@ -912,8 +912,8 @@
             "y": 860
           },
           "labelPos": {
-            "x": 850,
-            "y": 990
+            "x": 860,
+            "y": 860
           },
           "buttonType": "simple",
           "inputs": {
@@ -929,7 +929,7 @@
           },
           "labelPos": {
             "x": 80,
-            "y": 860
+            "y": 730
           },
           "buttonType": "simple",
           "inputs": {
@@ -945,7 +945,7 @@
           },
           "labelPos": {
             "x": 80,
-            "y": 990
+            "y": 860
           },
           "buttonType": "simple",
           "inputs": {
@@ -1065,7 +1065,7 @@
       "id": "3d09933c-7ac3-4dd2-b39d-5ea6cb81e58a",
       "name": "Right Stick",
       "device_uuid": "030000001d2300000002000000000000",
-      "device_name": "VKB Gladiator NXT R",
+      "device_name": "VKB Gladiator NXT (Right)",
       "joystickNumber": 1,
       "axis_profile": "VKB Gladiator NXT",
       "axis_mapping": {
@@ -1080,7 +1080,7 @@
       "mirror_from_page_id": "",
       "buttons": [
         {
-          "id": 1763294614206.244,
+          "id": 1763336709351.1682,
           "name": "Left Hat",
           "buttonPos": {
             "x": 584,
@@ -1100,7 +1100,7 @@
           }
         },
         {
-          "id": 1763294614206.916,
+          "id": 1763336709351.5864,
           "name": "Right Hat",
           "buttonPos": {
             "x": 474,
@@ -1119,7 +1119,7 @@
           }
         },
         {
-          "id": 1763294614206.496,
+          "id": 1763336709351.872,
           "name": "Red Button",
           "buttonPos": {
             "x": 454,
@@ -1135,7 +1135,7 @@
           }
         },
         {
-          "id": 1763294614206.432,
+          "id": 1763336709351.4487,
           "name": "Trigger",
           "buttonPos": {
             "x": 554,
@@ -1151,7 +1151,7 @@
           }
         },
         {
-          "id": 1763294614206.7617,
+          "id": 1763336709351.1897,
           "name": "Rocker Switch Up",
           "buttonPos": {
             "x": 554,
@@ -1167,7 +1167,7 @@
           }
         },
         {
-          "id": 1763294614206.7065,
+          "id": 1763336709351.802,
           "name": "Rocker Switch Down",
           "buttonPos": {
             "x": 554,
@@ -1183,7 +1183,7 @@
           }
         },
         {
-          "id": 1763294614206.7656,
+          "id": 1763336709351.2842,
           "name": "Side Hat",
           "buttonPos": {
             "x": 464,
@@ -1203,7 +1203,7 @@
           }
         },
         {
-          "id": 1763294614206.3433,
+          "id": 1763336709351.1155,
           "name": "F3",
           "buttonPos": {
             "x": 464,
@@ -1219,7 +1219,7 @@
           }
         },
         {
-          "id": 1763294614206.6907,
+          "id": 1763336709351.3672,
           "name": "F1",
           "buttonPos": {
             "x": 554,
@@ -1235,7 +1235,7 @@
           }
         },
         {
-          "id": 1763294614206.0002,
+          "id": 1763336709351.9443,
           "name": "F2",
           "buttonPos": {
             "x": 644,
@@ -1251,15 +1251,15 @@
           }
         },
         {
-          "id": 1763294614206.6152,
+          "id": 1763336709351.781,
           "name": "Right Encoder Up",
           "buttonPos": {
             "x": 454,
             "y": 860
           },
           "labelPos": {
-            "x": 174,
-            "y": 860
+            "x": 164,
+            "y": 730
           },
           "buttonType": "simple",
           "inputs": {
@@ -1267,15 +1267,15 @@
           }
         },
         {
-          "id": 1763294614206.4058,
+          "id": 1763336709351.749,
           "name": "Right Encoder Down",
           "buttonPos": {
             "x": 454,
             "y": 860
           },
           "labelPos": {
-            "x": 174,
-            "y": 990
+            "x": 164,
+            "y": 860
           },
           "buttonType": "simple",
           "inputs": {
@@ -1283,7 +1283,7 @@
           }
         },
         {
-          "id": 1763294614206.9775,
+          "id": 1763336709351.9958,
           "name": "Left Encoder Up",
           "buttonPos": {
             "x": 654,
@@ -1291,7 +1291,7 @@
           },
           "labelPos": {
             "x": 944,
-            "y": 860
+            "y": 730
           },
           "buttonType": "simple",
           "inputs": {
@@ -1299,7 +1299,7 @@
           }
         },
         {
-          "id": 1763294614206.793,
+          "id": 1763336709351.152,
           "name": "Left Encoder Down",
           "buttonPos": {
             "x": 654,
@@ -1307,7 +1307,7 @@
           },
           "labelPos": {
             "x": 944,
-            "y": 990
+            "y": 860
           },
           "buttonType": "simple",
           "inputs": {
@@ -1315,7 +1315,7 @@
           }
         },
         {
-          "id": 1763294614206.1987,
+          "id": 1763336709351.494,
           "name": "Side Button",
           "buttonPos": {
             "x": 424,
@@ -1331,7 +1331,7 @@
           }
         },
         {
-          "id": 1763294614206.026,
+          "id": 1763336709351.2434,
           "name": "Middle Hat",
           "buttonPos": {
             "x": 524,
@@ -1350,7 +1350,7 @@
           }
         },
         {
-          "id": 1763294614206.7898,
+          "id": 1763336709351.622,
           "name": "Y Axis",
           "buttonPos": {
             "x": 554,
@@ -1368,7 +1368,7 @@
           "inputId": "y"
         },
         {
-          "id": 1763294614206.2322,
+          "id": 1763336709351.7825,
           "name": "X Axis",
           "buttonPos": {
             "x": 554,
@@ -1386,7 +1386,7 @@
           "inputId": "x"
         },
         {
-          "id": 1763294614206.9124,
+          "id": 1763336709351.7808,
           "name": "Rot Z",
           "buttonPos": {
             "x": 554,
@@ -1404,7 +1404,7 @@
           "inputId": "rotz"
         },
         {
-          "id": 1763294614206.168,
+          "id": 1763336709351.6726,
           "name": "Slider",
           "buttonPos": {
             "x": 554,
