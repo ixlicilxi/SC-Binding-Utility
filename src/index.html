@@ -38,7 +38,7 @@
       <!-- Header Row 1 -->
       <div class="header-row-1">
         <div class="header-logo">
-          <h1>Star Citizen Binding Utility <span id="app-version">v0.6.0</span></h1>
+          <h1>Star Citizen Binding Utility <span id="app-version">v0.7.0</span></h1>
           <div id="update-info" class="header-update-info"></div>
         </div>
         <div class="header-actions">
@@ -416,12 +416,8 @@
               <!-- Floating Template Controls Panel -->
               <div class="template-controls-panel">
                 <div class="control-group">
-                  <div class="page-selector">
-                    <label for="toolbar-page-select"
-                      style="font-size: 11px; color: #aaa; margin-right: 4px;">Page:</label>
-                    <select id="toolbar-page-select" class="control-select" title="Select page to edit">
-                      <option value="">No pages</option>
-                    </select>
+                  <div class="page-selector" id="toolbar-page-buttons">
+                    <span style="font-size: 11px; color: #aaa; margin-right: 8px;">Page:</span>
                   </div>
                 </div>
                 <div class="control-divider"></div>
@@ -1013,7 +1009,7 @@
 
   <!-- Template Page Modal -->
   <div id="template-page-modal" class="modal" style="display: none;">
-    <div class="modal-content" style="max-width: 520px;">
+    <div class="modal-content" style="max-width: 610px;">
       <div class="modal-header">
         <h2 id="template-page-modal-title">Add Page</h2>
       </div>
@@ -1212,7 +1208,7 @@
   <div id="whats-new-modal" class="modal" style="display: none;">
     <div class="modal-content whats-new-modal-content">
       <div class="modal-header">
-        <h2>🎉 What's New in v0.6.0</h2>
+        <h2>🎉 What's New in v0.7.0</h2>
       </div>
       <div class="modal-body whats-new-body">
         <div class="whats-new-section">
@@ -1222,6 +1218,8 @@
               variable numbers of pages, and manual axis definition with presets (more presets will be added later,
               initial presets may be innacurate - so verify your axes!).
             </li>
+            <li><strong>Clickable Button IDs:</strong> You can now click on button IDs in the binding info to quickly
+              search for them in the main keybindings view.</li>
           </ul>
         </div>
         <div class="whats-new-section">

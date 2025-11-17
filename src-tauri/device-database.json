@@ -279,28 +279,26 @@
             "5": "",
             "6": "rotz"
         },
-        "Thrustmaster T.16000M": {
+        "Thrustmaster T.16000M (Unverified)": {
             "0": "x",
             "1": "y",
             "2": "z",
-            "3": "rotx",
-            "4": "roty",
-            "5": "rotz",
-            "6": "slider",
+            "3": "slider",
             "9": "hat"
         },
-        "Thrustmaster TFRP Rudder": {
+        "Thrustmaster TFRP Rudder (Unverified)": {
             "0": "x",
             "1": "y",
             "2": "z"
         },
-        "Logitech Extreme 3D": {
+        "Logitech Extreme 3D (Unverified)": {
             "0": "x",
             "1": "y",
             "2": "z",
-            "3": "rotx"
+            "3": "slider",
+            "9": "hat"
         },
-        "Virpil VPC Constellation ALPHA-R": {
+        "Virpil VPC Constellation ALPHA-R (Unverified)": {
             "0": "x",
             "1": "y",
             "2": "z",

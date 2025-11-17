@@ -412,7 +412,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.6.0';
+  const CURRENT_VERSION = '0.7.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -427,7 +427,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.6.0';
+  const CURRENT_VERSION = '0.7.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -1300,6 +1300,30 @@ window.safeUpdateTemplateIndicator = function (name)
     localStorage.setItem('pendingTemplateName', name);
   }
 }
+
+// Search for a button ID in the main keybindings view
+window.searchMainTabForButtonId = function (buttonId)
+{
+  // Switch to the main tab
+  switchTab('main');
+
+  // Get the search input element
+  const searchInput = document.getElementById('search-input');
+  if (searchInput)
+  {
+    // Set the search input value
+    searchInput.value = buttonId;
+
+    // Trigger the search by firing an input event
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Scroll the search input into view
+    searchInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Focus the search input
+    searchInput.focus();
+  }
+};
 
 async function saveKeybindings()
 {

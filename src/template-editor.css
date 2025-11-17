@@ -493,6 +493,38 @@
     align-items: center;
 }
 
+.template-controls-panel .toolbar-page-btn {
+    background: rgba(30, 30, 30, 0.85);
+    border: 1px solid #555;
+    color: #ddd;
+    padding: 0.35rem 0.8rem;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.template-controls-panel .toolbar-page-btn:hover {
+    border-color: #777;
+    background: rgba(40, 40, 40, 0.9);
+}
+
+.template-controls-panel .toolbar-page-btn.active {
+    background: rgba(74, 158, 255, 0.7);
+    border-color: #4a9eff;
+    color: #fff;
+    font-weight: 500;
+}
+
+.template-controls-panel .toolbar-page-btn.active:hover {
+    background: rgba(90, 170, 255, 0.85);
+    border-color: #6fb3ff;
+}
+
 .template-controls-panel .control-select {
     background: rgba(30, 30, 30, 0.85);
     border: 1px solid #555;

@@ -307,6 +307,9 @@ let currentHatDetectionSessionId = null; // Track current hat detection session
 // Track unsaved changes
 let hasUnsavedChanges = false;
 
+// Track current template file path for auto-saving
+let currentTemplateFilePath = null;
+
 // Export initialization function for tab system
 window.initializeTemplateEditor = function ()
 {
@@ -363,19 +366,8 @@ window.initializeTemplateEditor = function ()
 
 function initializeEventListeners()
 {
-    // Page selector dropdown
-    const toolbarPageSelect = document.getElementById('toolbar-page-select');
-    if (toolbarPageSelect)
-    {
-        toolbarPageSelect.addEventListener('change', (e) =>
-        {
-            const pageId = e.target.value;
-            if (pageId)
-            {
-                handleTemplatePageSelected(pageId);
-            }
-        });
-    }
+    // Page selector buttons are now handled dynamically by template-editor-v2.js
+    // No need to listen on a static dropdown anymore
 
     document.getElementById('save-template-btn').addEventListener('click', saveTemplate);
     document.getElementById('save-template-as-btn').addEventListener('click', saveTemplateAs);
@@ -938,9 +930,11 @@ async function newTemplate()
     // Clear localStorage
     localStorage.removeItem('currentTemplate');
     localStorage.removeItem('templateFileName');
+    localStorage.removeItem('templateFilePath');
     localStorage.removeItem('leftStickCamera');
     localStorage.removeItem('rightStickCamera');
     hasUnsavedChanges = false;
+    currentTemplateFilePath = null; // Clear the file path for new template
     updateUnsavedIndicator();
 
     // Reset header template name
@@ -1704,6 +1698,12 @@ async function mirrorTemplate()
         option2.textContent = page.name || `Page ${page.id}`;
         destSelect.appendChild(option2);
     });
+
+    // Auto-select the current page in the source dropdown
+    if (currentPageId)
+    {
+        sourceSelect.value = currentPageId;
+    }
 
     // Show modal
     modal.style.display = 'flex';
@@ -2719,6 +2719,125 @@ function clearHatDirection(direction)
 }
 
 // Template save/load
+// Helper function to prepare save data
+function prepareSaveData()
+{
+    // Helper to extract buttons array from stick (handles nested or flat structure)
+    const getStickButtons = (stick) =>
+    {
+        if (Array.isArray(stick)) return stick;
+        if (stick && stick.buttons && Array.isArray(stick.buttons)) return stick.buttons;
+        return [];
+    };
+
+    // Prepare data for saving with nested structure
+    return {
+        name: templateData.name,
+        joystickModel: templateData.joystickModel,
+        version: templateData.version || '1.0',
+        imageWidth: loadedImage ? loadedImage.width : 0,
+        imageHeight: loadedImage ? loadedImage.height : 0,
+        leftStick: {
+            joystickNumber: templateData.leftStick.joystickNumber || 1,
+            buttons: getStickButtons(templateData.leftStick).map(b => ({
+                id: b.id,
+                name: b.name,
+                buttonPos: b.buttonPos,
+                labelPos: b.labelPos,
+                buttonType: b.buttonType || 'simple',
+                inputs: b.inputs || {},
+                // Legacy support
+                inputType: b.inputType,
+                inputId: b.inputId
+            }))
+        },
+        rightStick: {
+            joystickNumber: templateData.rightStick.joystickNumber || 2,
+            buttons: getStickButtons(templateData.rightStick).map(b => ({
+                id: b.id,
+                name: b.name,
+                buttonPos: b.buttonPos,
+                labelPos: b.labelPos,
+                buttonType: b.buttonType || 'simple',
+                inputs: b.inputs || {},
+                // Legacy support
+                inputType: b.inputType,
+                inputId: b.inputId
+            }))
+        },
+        pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
+            id: page.id,
+            name: page.name || 'Untitled Page',
+            device_uuid: page.device_uuid || '',
+            device_name: page.device_name || '',
+            joystickNumber: page.joystickNumber || 1,
+            axis_profile: page.axis_profile || 'default',
+            axis_mapping: page.axis_mapping || {},
+            image_path: page.image_path || '',
+            image_data_url: page.image_data_url || null,
+            mirror_from_page_id: page.mirror_from_page_id || '',
+            buttons: (page.buttons || []).map(b => ({
+                id: b.id,
+                name: b.name,
+                buttonPos: b.buttonPos,
+                labelPos: b.labelPos,
+                buttonType: b.buttonType || 'simple',
+                inputs: b.inputs || {},
+                inputType: b.inputType,
+                inputId: b.inputId
+            }))
+        })) : []
+    };
+}
+
+// Helper function to save template to a given file path
+async function performSave(filePath, showNotification = true)
+{
+    const showAlert = window.showAlert || alert;
+
+    try
+    {
+        const saveData = prepareSaveData();
+
+        await invoke('save_template', {
+            filePath,
+            templateJson: JSON.stringify(saveData, null, 2)
+        });
+
+        // Update current file path for future saves
+        currentTemplateFilePath = filePath;
+
+        // Persist to localStorage
+        localStorage.setItem('currentTemplate', JSON.stringify(saveData));
+        const fileName = filePath.split(/[\\\/]/).pop();
+        localStorage.setItem('templateFileName', fileName);
+        localStorage.setItem('templateFilePath', filePath);
+
+        // Clear unsaved changes
+        hasUnsavedChanges = false;
+        updateUnsavedIndicator();
+
+        // Update header template name
+        if (window.updateTemplateIndicator)
+        {
+            window.updateTemplateIndicator(templateData.name, fileName);
+        }
+
+        if (showNotification)
+        {
+            await showAlert('Template saved successfully!', 'Template Saved');
+        }
+
+        return true;
+    } catch (error)
+    {
+        console.error('Error saving template:', error);
+        await showAlert(`Failed to save template: ${error}`, 'Error');
+        return false;
+    }
+}
+
+// Save to current file (auto-save), or show dialog if no current file
 async function saveTemplate()
 {
     const showAlert = window.showAlert || alert;
@@ -2759,6 +2878,14 @@ async function saveTemplate()
         return;
     }
 
+    // If we have a current file path, save directly without dialog
+    if (currentTemplateFilePath)
+    {
+        await performSave(currentTemplateFilePath, true);
+        return;
+    }
+
+    // Otherwise, show file picker (same as Save As)
     try
     {
         let resourceDir;
@@ -2782,94 +2909,7 @@ async function saveTemplate()
 
         if (!filePath) return; // User cancelled
 
-        // Helper to extract buttons array from stick (handles nested or flat structure)
-        const getStickButtons = (stick) =>
-        {
-            if (Array.isArray(stick)) return stick;
-            if (stick && stick.buttons && Array.isArray(stick.buttons)) return stick.buttons;
-            return [];
-        };
-
-        // Prepare data for saving with nested structure
-        const saveData = {
-            name: templateData.name,
-            joystickModel: templateData.joystickModel,
-            version: templateData.version || '1.0',
-            imageWidth: loadedImage ? loadedImage.width : 0,
-            imageHeight: loadedImage ? loadedImage.height : 0,
-            leftStick: {
-                joystickNumber: templateData.leftStick.joystickNumber || 1,
-                buttons: getStickButtons(templateData.leftStick).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    // Legacy support
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            },
-            rightStick: {
-                joystickNumber: templateData.rightStick.joystickNumber || 2,
-                buttons: getStickButtons(templateData.rightStick).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    // Legacy support
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            },
-            pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
-                id: page.id,
-                name: page.name || 'Untitled Page',
-                device_uuid: page.device_uuid || '',
-                device_name: page.device_name || '',
-                joystickNumber: page.joystickNumber || 1,
-                axis_profile: page.axis_profile || 'default',
-                axis_mapping: page.axis_mapping || {},
-                image_path: page.image_path || '',
-                image_data_url: page.image_data_url || null,
-                mirror_from_page_id: page.mirror_from_page_id || '',
-                buttons: (page.buttons || []).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            })) : []
-        };
-
-        await invoke('save_template', {
-            filePath,
-            templateJson: JSON.stringify(saveData, null, 2)
-        });
-
-        // Persist to localStorage
-        localStorage.setItem('currentTemplate', JSON.stringify(saveData));
-        const fileName = filePath.split(/[\\\/]/).pop();
-        localStorage.setItem('templateFileName', fileName);
-
-        // Clear unsaved changes
-        hasUnsavedChanges = false;
-        updateUnsavedIndicator();
-
-        // Update header template name
-        if (window.updateTemplateIndicator)
-        {
-            window.updateTemplateIndicator(templateData.name, fileName);
-        }
-
-        await showAlert('Template saved successfully!', 'Template Saved');
+        await performSave(filePath, true);
     } catch (error)
     {
         console.error('Error saving template:', error);
@@ -2877,6 +2917,7 @@ async function saveTemplate()
     }
 }
 
+// Save As - always shows file picker
 async function saveTemplateAs()
 {
     const showAlert = window.showAlert || alert;
@@ -2941,94 +2982,7 @@ async function saveTemplateAs()
 
         if (!filePath) return; // User cancelled
 
-        // Helper to extract buttons array from stick (handles nested or flat structure)
-        const getStickButtons = (stick) =>
-        {
-            if (Array.isArray(stick)) return stick;
-            if (stick && stick.buttons && Array.isArray(stick.buttons)) return stick.buttons;
-            return [];
-        };
-
-        // Prepare data for saving with nested structure
-        const saveData = {
-            name: templateData.name,
-            joystickModel: templateData.joystickModel,
-            version: templateData.version || '1.0',
-            imageWidth: loadedImage ? loadedImage.width : 0,
-            imageHeight: loadedImage ? loadedImage.height : 0,
-            leftStick: {
-                joystickNumber: templateData.leftStick.joystickNumber || 1,
-                buttons: getStickButtons(templateData.leftStick).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    // Legacy support
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            },
-            rightStick: {
-                joystickNumber: templateData.rightStick.joystickNumber || 2,
-                buttons: getStickButtons(templateData.rightStick).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    // Legacy support
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            },
-            pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
-                id: page.id,
-                name: page.name || 'Untitled Page',
-                device_uuid: page.device_uuid || '',
-                device_name: page.device_name || '',
-                joystickNumber: page.joystickNumber || 1,
-                axis_profile: page.axis_profile || 'default',
-                axis_mapping: page.axis_mapping || {},
-                image_path: page.image_path || '',
-                image_data_url: page.image_data_url || null,
-                mirror_from_page_id: page.mirror_from_page_id || '',
-                buttons: (page.buttons || []).map(b => ({
-                    id: b.id,
-                    name: b.name,
-                    buttonPos: b.buttonPos,
-                    labelPos: b.labelPos,
-                    buttonType: b.buttonType || 'simple',
-                    inputs: b.inputs || {},
-                    inputType: b.inputType,
-                    inputId: b.inputId
-                }))
-            })) : []
-        };
-
-        await invoke('save_template', {
-            filePath,
-            templateJson: JSON.stringify(saveData, null, 2)
-        });
-
-        // Persist to localStorage
-        localStorage.setItem('currentTemplate', JSON.stringify(saveData));
-        const fileNameAs = filePath.split(/[\\\/]/).pop();
-        localStorage.setItem('templateFileName', fileNameAs);
-
-        // Clear unsaved changes
-        hasUnsavedChanges = false;
-        updateUnsavedIndicator();
-
-        // Update header template name
-        if (window.updateTemplateIndicator)
-        {
-            window.updateTemplateIndicator(templateData.name, fileNameAs);
-        }
-
-        await showAlert('Template saved successfully!', 'Template Saved');
+        await performSave(filePath, true);
     } catch (error)
     {
         console.error('Error saving template:', error);
@@ -3111,6 +3065,10 @@ async function loadTemplate()
         localStorage.setItem('currentTemplate', JSON.stringify(data));
         const fileName = filePath.split(/[\\\/]/).pop();
         localStorage.setItem('templateFileName', fileName);
+        localStorage.setItem('templateFilePath', filePath);
+
+        // Set current file path for auto-save
+        currentTemplateFilePath = filePath;
 
         // Reset unsaved changes
         hasUnsavedChanges = false;
@@ -3283,6 +3241,13 @@ function loadPersistedTemplate()
         if (savedTemplate)
         {
             const data = JSON.parse(savedTemplate);
+
+            // Restore file path for auto-save functionality
+            const savedFilePath = localStorage.getItem('templateFilePath');
+            if (savedFilePath)
+            {
+                currentTemplateFilePath = savedFilePath;
+            }
 
             // Restore camera positions if available
             const savedLeftCamera = localStorage.getItem('leftStickCamera');

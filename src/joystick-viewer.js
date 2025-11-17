@@ -1475,7 +1475,7 @@ function showBindingInfo(buttonData, bindings)
             <button class="binding-info-close" onclick="hideBindingInfo()">×</button>
         </div>
         <div class="binding-info-details">
-            <span class="binding-info-id">Button ID: <code>${buttonIdString}</code></span>
+            <span class="binding-info-id">Button ID: <code class="button-id-link" onclick="window.searchMainTabForButtonId('${buttonIdString}')" style="cursor: pointer; color: #4a9eff; text-decoration: underline;">${buttonIdString}</code></span>
         </div>
         <div class="binding-info-content">
     `;

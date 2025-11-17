@@ -1480,7 +1480,6 @@ input[type="checkbox"]:disabled:hover {
 }
 
 .modal-section:last-child {
-  margin-bottom: -1.5rem;
   border-bottom: none;
 }
 

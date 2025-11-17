@@ -17,6 +17,15 @@ export const NumLines = 6;
 export const HatSpacing = 6;
 export const ActionTextSize = '14px';
 
+// Font sizes
+export const TitleFontSize = '16px';
+export const TitleFontSizeCompact = '11px';
+export const ContentFontSize = '14px';
+export const ContentFontSizeCompact = '14px';
+export const HatTitleFontSize = '16px';
+export const TextLineHeight = 12;
+export const TextLineHeightCompact = 11;
+
 // ========================================
 // Drawing Helper Functions
 // ========================================
@@ -78,10 +87,10 @@ export function drawConnectingLine(ctx, buttonPos, labelPos, boxHalfWidth, lineC
         return;
     }
 
-    // For regular buttons, calculate label box dimensions
-    const labelWidth = boxHalfWidth * 2;
+    // For regular buttons, calculate label box dimensions using constants
+    const labelWidth = ButtonFrameWidth;
     const labelHeight = ButtonFrameHeight;
-    const labelX = labelPos.x - boxHalfWidth;
+    const labelX = labelPos.x - labelWidth / 2;
     const labelY = labelPos.y - labelHeight / 2;
     const labelRight = labelX + labelWidth;
     const labelLeft = labelX;
@@ -245,9 +254,9 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     // Calculate text layout metrics
     const padding = 4;
     const contentWidth = boxWidth - (padding * 2);
-    const lineHeight = compact ? 11 : 12;
-    const titleFontSize = compact ? '11px' : '12px';
-    const contentFontSize = compact ? '9px' : '10px';
+    const lineHeight = compact ? TextLineHeightCompact : TextLineHeight;
+    const titleFontSize = compact ? TitleFontSizeCompact : TitleFontSize;
+    const contentFontSize = compact ? ContentFontSizeCompact : ContentFontSize;
     const actionFontSize = ActionTextSize;
     const countFontSize = ActionTextSize;
     const titleSpacing = compact ? 14 : 18;
@@ -622,10 +631,6 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
     ctx.save();
     ctx.globalAlpha = alpha;
 
-    const boxWidth = HatFrameWidth;
-    const boxHeight = HatFrameHeight;
-    const radius = 4;
-
     // Check if push button exists
     const hasPush = hat.inputs && hat.inputs['push'];
 
@@ -637,12 +642,12 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
     let offsetY = HatFrameHeight * 2;
     if (!hasPush) offsetY -= HatFrameHeight / 2 + HatSpacing;
 
-    const titleGap = 12;
+    const titleGap = -8;
     const titleY = hat.labelPos.y - offsetY - titleGap;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
-    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.font = `${HatTitleFontSize} "Segoe UI", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const simplifiedName = simplifyButtonName(hat.name || 'Hat');

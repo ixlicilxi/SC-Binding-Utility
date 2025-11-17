@@ -315,33 +315,36 @@ function renderPageList()
 
 function updateToolbarPageSelector()
 {
-    const toolbarPageSelect = document.getElementById('toolbar-page-select');
-    if (!toolbarPageSelect) return;
+    const toolbarPageButtons = document.getElementById('toolbar-page-buttons');
+    if (!toolbarPageButtons) return;
 
     const pages = state.template.pages;
-    toolbarPageSelect.innerHTML = '';
+
+    // Remove all page buttons (keep the label)
+    const existingButtons = toolbarPageButtons.querySelectorAll('button');
+    existingButtons.forEach(btn => btn.remove());
 
     if (pages.length === 0)
     {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No pages';
-        toolbarPageSelect.appendChild(option);
-        toolbarPageSelect.disabled = true;
         return;
     }
 
-    toolbarPageSelect.disabled = false;
+    // Create a button for each page
     pages.forEach(page =>
     {
-        const option = document.createElement('option');
-        option.value = page.id;
-        option.textContent = page.name || 'Untitled Page';
-        if (page.id === state.selectedPageId)
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `control-btn toolbar-page-btn ${page.id === state.selectedPageId ? 'active' : ''}`;
+        button.textContent = page.name || 'Untitled Page';
+        button.title = page.device_name || 'No device selected';
+        button.dataset.pageId = page.id;
+
+        button.addEventListener('click', () =>
         {
-            option.selected = true;
-        }
-        toolbarPageSelect.appendChild(option);
+            selectPage(page.id);
+        });
+
+        toolbarPageButtons.appendChild(button);
     });
 }
 
