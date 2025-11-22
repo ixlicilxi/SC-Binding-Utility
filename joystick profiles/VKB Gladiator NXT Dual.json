@@ -1,14 +1,14 @@
 {
   "name": "Dual VKB Gladiator NXT",
   "joystickModel": "VKB Gladiator NXT",
-  "version": "1.0",
+  "version": "1.1",
   "imageWidth": 1024,
   "imageHeight": 1024,
   "leftStick": {
-    "joystickNumber": 2,
+    "joystickNumber": 1,
     "buttons": [
       {
-        "id": 1763518381713.3835,
+        "id": 1763641201495.597,
         "name": "Left Hat",
         "buttonPos": {
           "x": 440,
@@ -20,15 +20,15 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button11",
-          "down": "js2_button13",
-          "left": "js2_button14",
-          "right": "js2_button12",
-          "push": "js2_button15"
+          "up": "button11",
+          "down": "button13",
+          "left": "button14",
+          "right": "button12",
+          "push": "button15"
         }
       },
       {
-        "id": 1763518381713.3923,
+        "id": 1763641201495.279,
         "name": "Right Hat",
         "buttonPos": {
           "x": 550,
@@ -40,14 +40,14 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_hat1_up",
-          "down": "js2_hat1_down",
-          "left": "js2_hat1_left",
-          "right": "js2_hat1_right"
+          "up": "hat1_up",
+          "down": "hat1_down",
+          "left": "hat1_left",
+          "right": "hat1_right"
         }
       },
       {
-        "id": 1763518381713.6086,
+        "id": 1763641201495.4563,
         "name": "Red Button",
         "buttonPos": {
           "x": 570,
@@ -59,11 +59,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button3"
+          "main": "button3"
         }
       },
       {
-        "id": 1763518381713.2393,
+        "id": 1763641201495.9888,
         "name": "Trigger",
         "buttonPos": {
           "x": 470,
@@ -75,11 +75,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button1"
+          "main": "button1"
         }
       },
       {
-        "id": 1763518381713.4685,
+        "id": 1763641201495.879,
         "name": "Rocker Switch Up",
         "buttonPos": {
           "x": 470,
@@ -91,11 +91,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button21"
+          "main": "button21"
         }
       },
       {
-        "id": 1763518381713.148,
+        "id": 1763641201495.2827,
         "name": "Rocker Switch Down",
         "buttonPos": {
           "x": 470,
@@ -107,11 +107,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button22"
+          "main": "button22"
         }
       },
       {
-        "id": 1763518381713.2908,
+        "id": 1763641201495.2576,
         "name": "Side Hat",
         "buttonPos": {
           "x": 560,
@@ -123,15 +123,15 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button16",
-          "down": "js2_button18",
-          "left": "js2_button19",
-          "right": "js2_button17",
-          "push": "js2_button20"
+          "up": "button16",
+          "down": "button18",
+          "left": "button19",
+          "right": "button17",
+          "push": "button20"
         }
       },
       {
-        "id": 1763518381713.1196,
+        "id": 1763641201495.227,
         "name": "F3",
         "buttonPos": {
           "x": 560,
@@ -143,11 +143,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button28"
+          "main": "button28"
         }
       },
       {
-        "id": 1763518381713.6848,
+        "id": 1763641201495.1904,
         "name": "F1",
         "buttonPos": {
           "x": 470,
@@ -159,11 +159,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button27"
+          "main": "button27"
         }
       },
       {
-        "id": 1763518381713.613,
+        "id": 1763641201495.0374,
         "name": "F2",
         "buttonPos": {
           "x": 380,
@@ -175,11 +175,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button29"
+          "main": "button29"
         }
       },
       {
-        "id": 1763518381713.1755,
+        "id": 1763641201495.4387,
         "name": "Right Encoder Up",
         "buttonPos": {
           "x": 570,
@@ -191,11 +191,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button23"
+          "main": "button23"
         }
       },
       {
-        "id": 1763518381713.9448,
+        "id": 1763641201495.3574,
         "name": "Right Encoder Down",
         "buttonPos": {
           "x": 570,
@@ -207,11 +207,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button24"
+          "main": "button24"
         }
       },
       {
-        "id": 1763518381713.4683,
+        "id": 1763641201495.4058,
         "name": "Left Encoder Up",
         "buttonPos": {
           "x": 370,
@@ -223,27 +223,27 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button25"
+          "main": "button25"
         }
       },
       {
-        "id": 1763518381713.3176,
+        "id": 1763641201495.2234,
         "name": "Left Encoder Down",
         "buttonPos": {
           "x": 370,
           "y": 860
         },
         "labelPos": {
-          "x": 110,
-          "y": 870
+          "x": 80,
+          "y": 860
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button26"
+          "main": "button26"
         }
       },
       {
-        "id": 1763518381713.0552,
+        "id": 1763641201495.337,
         "name": "Side Button",
         "buttonPos": {
           "x": 400,
@@ -255,11 +255,11 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button4"
+          "main": "button4"
         }
       },
       {
-        "id": 1763518381713.2632,
+        "id": 1763641201495.8018,
         "name": "Middle Hat",
         "buttonPos": {
           "x": 500,
@@ -271,14 +271,14 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button6",
-          "down": "js2_button8",
-          "left": "js2_button9",
-          "right": "js2_button7"
+          "up": "button6",
+          "down": "button8",
+          "left": "button9",
+          "right": "button7"
         }
       },
       {
-        "id": 1763518381713.8564,
+        "id": 1763641201495.2146,
         "name": "Y Axis",
         "buttonPos": {
           "x": 470,
@@ -290,13 +290,13 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_y"
+          "main": "y"
         },
         "inputType": "axis",
         "inputId": "y"
       },
       {
-        "id": 1763518381713.017,
+        "id": 1763641201495.387,
         "name": "X Axis",
         "buttonPos": {
           "x": 470,
@@ -308,13 +308,13 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_x"
+          "main": "x"
         },
         "inputType": "axis",
         "inputId": "x"
       },
       {
-        "id": 1763518381713.0947,
+        "id": 1763641201495.1392,
         "name": "Rot Z",
         "buttonPos": {
           "x": 470,
@@ -326,13 +326,13 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_rotz"
+          "main": "rotz"
         },
         "inputType": "axis",
         "inputId": "rotz"
       },
       {
-        "id": 1763518381713.7947,
+        "id": 1763641201495.7612,
         "name": "Slider",
         "buttonPos": {
           "x": 470,
@@ -344,13 +344,13 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_z"
+          "main": "z"
         },
         "inputType": "axis",
         "inputId": "z"
       },
       {
-        "id": 1763518381713.5083,
+        "id": 1763641201495.3435,
         "name": "Trigger Stage 2",
         "buttonPos": {
           "x": 480,
@@ -362,7 +362,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button2"
+          "main": "button2"
         },
         "inputType": "button",
         "inputId": 2
@@ -370,7 +370,7 @@
     ]
   },
   "rightStick": {
-    "joystickNumber": 1,
+    "joystickNumber": 2,
     "buttons": [
       {
         "id": 1763518327107.358,
@@ -385,11 +385,11 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button11",
-          "down": "js2_button13",
-          "left": "js2_button14",
-          "right": "js2_button12",
-          "push": "js2_button15"
+          "up": "button11",
+          "down": "button13",
+          "left": "button14",
+          "right": "button12",
+          "push": "button15"
         }
       },
       {
@@ -405,10 +405,10 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_hat1_up",
-          "down": "js2_hat1_down",
-          "left": "js2_hat1_left",
-          "right": "js2_hat1_right"
+          "up": "hat1_up",
+          "down": "hat1_down",
+          "left": "hat1_left",
+          "right": "hat1_right"
         }
       },
       {
@@ -424,7 +424,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button3"
+          "main": "button3"
         }
       },
       {
@@ -440,7 +440,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button1"
+          "main": "button1"
         }
       },
       {
@@ -456,7 +456,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button21"
+          "main": "button21"
         }
       },
       {
@@ -472,7 +472,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button22"
+          "main": "button22"
         }
       },
       {
@@ -488,11 +488,11 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button16",
-          "down": "js2_button18",
-          "left": "js2_button19",
-          "right": "js2_button17",
-          "push": "js2_button20"
+          "up": "button16",
+          "down": "button18",
+          "left": "button19",
+          "right": "button17",
+          "push": "button20"
         }
       },
       {
@@ -508,7 +508,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button28"
+          "main": "button28"
         }
       },
       {
@@ -524,7 +524,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button27"
+          "main": "button27"
         }
       },
       {
@@ -540,7 +540,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button29"
+          "main": "button29"
         }
       },
       {
@@ -556,7 +556,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button23"
+          "main": "button23"
         }
       },
       {
@@ -572,7 +572,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button24"
+          "main": "button24"
         }
       },
       {
@@ -588,7 +588,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button25"
+          "main": "button25"
         }
       },
       {
@@ -604,7 +604,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button26"
+          "main": "button26"
         }
       },
       {
@@ -620,7 +620,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button4"
+          "main": "button4"
         }
       },
       {
@@ -636,10 +636,10 @@
         },
         "buttonType": "hat4way",
         "inputs": {
-          "up": "js2_button6",
-          "down": "js2_button8",
-          "left": "js2_button9",
-          "right": "js2_button7"
+          "up": "button6",
+          "down": "button8",
+          "left": "button9",
+          "right": "button7"
         }
       },
       {
@@ -655,7 +655,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js1_y"
+          "main": "y"
         },
         "inputType": "axis",
         "inputId": "y"
@@ -673,7 +673,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js1_x"
+          "main": "x"
         },
         "inputType": "axis",
         "inputId": "x"
@@ -691,7 +691,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js1_rotz"
+          "main": "rotz"
         },
         "inputType": "axis",
         "inputId": "rotz"
@@ -709,7 +709,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js1_z"
+          "main": "z"
         },
         "inputType": "axis",
         "inputId": "z"
@@ -727,7 +727,7 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js2_button2"
+          "main": "button2"
         },
         "inputType": "button",
         "inputId": 2
@@ -740,8 +740,8 @@
       "name": "Left Stick",
       "device_uuid": "030000001d2300000102000000000000",
       "device_name": "VKB Gladiator NXT (Left)",
-      "joystickNumber": 2,
-      "joystick_prefix": "",
+      "joystickNumber": 1,
+      "device_prefix": "",
       "axis_profile": "VKB Gladiator NXT",
       "axis_mapping": {
         "1": "x",
@@ -755,7 +755,7 @@
       "mirror_from_page_id": "3d09933c-7ac3-4dd2-b39d-5ea6cb81e58a",
       "buttons": [
         {
-          "id": 1763518381713.3835,
+          "id": 1763641201495.597,
           "name": "Left Hat",
           "buttonPos": {
             "x": 440,
@@ -767,15 +767,15 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button11",
-            "down": "js2_button13",
-            "left": "js2_button14",
-            "right": "js2_button12",
-            "push": "js2_button15"
+            "up": "button11",
+            "down": "button13",
+            "left": "button14",
+            "right": "button12",
+            "push": "button15"
           }
         },
         {
-          "id": 1763518381713.3923,
+          "id": 1763641201495.279,
           "name": "Right Hat",
           "buttonPos": {
             "x": 550,
@@ -787,14 +787,14 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_hat1_up",
-            "down": "js2_hat1_down",
-            "left": "js2_hat1_left",
-            "right": "js2_hat1_right"
+            "up": "hat1_up",
+            "down": "hat1_down",
+            "left": "hat1_left",
+            "right": "hat1_right"
           }
         },
         {
-          "id": 1763518381713.6086,
+          "id": 1763641201495.4563,
           "name": "Red Button",
           "buttonPos": {
             "x": 570,
@@ -806,11 +806,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button3"
+            "main": "button3"
           }
         },
         {
-          "id": 1763518381713.2393,
+          "id": 1763641201495.9888,
           "name": "Trigger",
           "buttonPos": {
             "x": 470,
@@ -822,11 +822,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button1"
+            "main": "button1"
           }
         },
         {
-          "id": 1763518381713.4685,
+          "id": 1763641201495.879,
           "name": "Rocker Switch Up",
           "buttonPos": {
             "x": 470,
@@ -838,11 +838,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button21"
+            "main": "button21"
           }
         },
         {
-          "id": 1763518381713.148,
+          "id": 1763641201495.2827,
           "name": "Rocker Switch Down",
           "buttonPos": {
             "x": 470,
@@ -854,11 +854,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button22"
+            "main": "button22"
           }
         },
         {
-          "id": 1763518381713.2908,
+          "id": 1763641201495.2576,
           "name": "Side Hat",
           "buttonPos": {
             "x": 560,
@@ -870,15 +870,15 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button16",
-            "down": "js2_button18",
-            "left": "js2_button19",
-            "right": "js2_button17",
-            "push": "js2_button20"
+            "up": "button16",
+            "down": "button18",
+            "left": "button19",
+            "right": "button17",
+            "push": "button20"
           }
         },
         {
-          "id": 1763518381713.1196,
+          "id": 1763641201495.227,
           "name": "F3",
           "buttonPos": {
             "x": 560,
@@ -890,11 +890,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button28"
+            "main": "button28"
           }
         },
         {
-          "id": 1763518381713.6848,
+          "id": 1763641201495.1904,
           "name": "F1",
           "buttonPos": {
             "x": 470,
@@ -906,11 +906,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button27"
+            "main": "button27"
           }
         },
         {
-          "id": 1763518381713.613,
+          "id": 1763641201495.0374,
           "name": "F2",
           "buttonPos": {
             "x": 380,
@@ -922,11 +922,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button29"
+            "main": "button29"
           }
         },
         {
-          "id": 1763518381713.1755,
+          "id": 1763641201495.4387,
           "name": "Right Encoder Up",
           "buttonPos": {
             "x": 570,
@@ -938,11 +938,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button23"
+            "main": "button23"
           }
         },
         {
-          "id": 1763518381713.9448,
+          "id": 1763641201495.3574,
           "name": "Right Encoder Down",
           "buttonPos": {
             "x": 570,
@@ -954,11 +954,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button24"
+            "main": "button24"
           }
         },
         {
-          "id": 1763518381713.4683,
+          "id": 1763641201495.4058,
           "name": "Left Encoder Up",
           "buttonPos": {
             "x": 370,
@@ -970,27 +970,27 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button25"
+            "main": "button25"
           }
         },
         {
-          "id": 1763518381713.3176,
+          "id": 1763641201495.2234,
           "name": "Left Encoder Down",
           "buttonPos": {
             "x": 370,
             "y": 860
           },
           "labelPos": {
-            "x": 110,
-            "y": 870
+            "x": 80,
+            "y": 860
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button26"
+            "main": "button26"
           }
         },
         {
-          "id": 1763518381713.0552,
+          "id": 1763641201495.337,
           "name": "Side Button",
           "buttonPos": {
             "x": 400,
@@ -1002,11 +1002,11 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button4"
+            "main": "button4"
           }
         },
         {
-          "id": 1763518381713.2632,
+          "id": 1763641201495.8018,
           "name": "Middle Hat",
           "buttonPos": {
             "x": 500,
@@ -1018,14 +1018,14 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button6",
-            "down": "js2_button8",
-            "left": "js2_button9",
-            "right": "js2_button7"
+            "up": "button6",
+            "down": "button8",
+            "left": "button9",
+            "right": "button7"
           }
         },
         {
-          "id": 1763518381713.8564,
+          "id": 1763641201495.2146,
           "name": "Y Axis",
           "buttonPos": {
             "x": 470,
@@ -1037,13 +1037,13 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_y"
+            "main": "y"
           },
           "inputType": "axis",
           "inputId": "y"
         },
         {
-          "id": 1763518381713.017,
+          "id": 1763641201495.387,
           "name": "X Axis",
           "buttonPos": {
             "x": 470,
@@ -1055,13 +1055,13 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_x"
+            "main": "x"
           },
           "inputType": "axis",
           "inputId": "x"
         },
         {
-          "id": 1763518381713.0947,
+          "id": 1763641201495.1392,
           "name": "Rot Z",
           "buttonPos": {
             "x": 470,
@@ -1073,13 +1073,13 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_rotz"
+            "main": "rotz"
           },
           "inputType": "axis",
           "inputId": "rotz"
         },
         {
-          "id": 1763518381713.7947,
+          "id": 1763641201495.7612,
           "name": "Slider",
           "buttonPos": {
             "x": 470,
@@ -1091,13 +1091,13 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_z"
+            "main": "z"
           },
           "inputType": "axis",
           "inputId": "z"
         },
         {
-          "id": 1763518381713.5083,
+          "id": 1763641201495.3435,
           "name": "Trigger Stage 2",
           "buttonPos": {
             "x": 480,
@@ -1109,7 +1109,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button2"
+            "main": "button2"
           },
           "inputType": "button",
           "inputId": 2
@@ -1121,8 +1121,8 @@
       "name": "Right Stick",
       "device_uuid": "030000001d2300000002000000000000",
       "device_name": "VKB Gladiator NXT (Right)",
-      "joystickNumber": 1,
-      "joystick_prefix": "",
+      "joystickNumber": 2,
+      "device_prefix": "",
       "axis_profile": "VKB Gladiator NXT",
       "axis_mapping": {
         "1": "x",
@@ -1148,11 +1148,11 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button11",
-            "down": "js2_button13",
-            "left": "js2_button14",
-            "right": "js2_button12",
-            "push": "js2_button15"
+            "up": "button11",
+            "down": "button13",
+            "left": "button14",
+            "right": "button12",
+            "push": "button15"
           }
         },
         {
@@ -1168,10 +1168,10 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_hat1_up",
-            "down": "js2_hat1_down",
-            "left": "js2_hat1_left",
-            "right": "js2_hat1_right"
+            "up": "hat1_up",
+            "down": "hat1_down",
+            "left": "hat1_left",
+            "right": "hat1_right"
           }
         },
         {
@@ -1187,7 +1187,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button3"
+            "main": "button3"
           }
         },
         {
@@ -1203,7 +1203,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button1"
+            "main": "button1"
           }
         },
         {
@@ -1219,7 +1219,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button21"
+            "main": "button21"
           }
         },
         {
@@ -1235,7 +1235,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button22"
+            "main": "button22"
           }
         },
         {
@@ -1251,11 +1251,11 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button16",
-            "down": "js2_button18",
-            "left": "js2_button19",
-            "right": "js2_button17",
-            "push": "js2_button20"
+            "up": "button16",
+            "down": "button18",
+            "left": "button19",
+            "right": "button17",
+            "push": "button20"
           }
         },
         {
@@ -1271,7 +1271,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button28"
+            "main": "button28"
           }
         },
         {
@@ -1287,7 +1287,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button27"
+            "main": "button27"
           }
         },
         {
@@ -1303,7 +1303,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button29"
+            "main": "button29"
           }
         },
         {
@@ -1319,7 +1319,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button23"
+            "main": "button23"
           }
         },
         {
@@ -1335,7 +1335,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button24"
+            "main": "button24"
           }
         },
         {
@@ -1351,7 +1351,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button25"
+            "main": "button25"
           }
         },
         {
@@ -1367,7 +1367,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button26"
+            "main": "button26"
           }
         },
         {
@@ -1383,7 +1383,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button4"
+            "main": "button4"
           }
         },
         {
@@ -1399,10 +1399,10 @@
           },
           "buttonType": "hat4way",
           "inputs": {
-            "up": "js2_button6",
-            "down": "js2_button8",
-            "left": "js2_button9",
-            "right": "js2_button7"
+            "up": "button6",
+            "down": "button8",
+            "left": "button9",
+            "right": "button7"
           }
         },
         {
@@ -1418,7 +1418,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js1_y"
+            "main": "y"
           },
           "inputType": "axis",
           "inputId": "y"
@@ -1436,7 +1436,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js1_x"
+            "main": "x"
           },
           "inputType": "axis",
           "inputId": "x"
@@ -1454,7 +1454,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js1_rotz"
+            "main": "rotz"
           },
           "inputType": "axis",
           "inputId": "rotz"
@@ -1472,7 +1472,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js1_z"
+            "main": "z"
           },
           "inputType": "axis",
           "inputId": "z"
@@ -1490,7 +1490,7 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js2_button2"
+            "main": "button2"
           },
           "inputType": "button",
           "inputId": 2
