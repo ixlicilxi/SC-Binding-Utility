@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () =>
 function initializeHIDDebugger()
 {
     // Get DOM elements
+    const backBtn = document.getElementById('back-to-main');
     startBtn = document.getElementById('start-hid-debug-btn');
     stopBtn = document.getElementById('stop-hid-debug-btn');
     clearBtn = document.getElementById('clear-hid-debug-btn');
@@ -49,6 +50,21 @@ function initializeHIDDebugger()
     closeModalBtn = document.getElementById('close-device-selection-modal');
     closeModalFooterBtn = document.getElementById('close-device-selection-footer');
     deviceSelectionList = document.getElementById('device-selection-list');
+
+    // Back button handler
+    if (backBtn)
+    {
+        backBtn.addEventListener('click', () =>
+        {
+            // Stop polling if active
+            if (isPolling)
+            {
+                stopPolling();
+            }
+            // Navigate back to main page
+            window.location.href = 'index.html';
+        });
+    }
 
     showUnchangedCheckbox = document.getElementById('show-unchanged-values');
 

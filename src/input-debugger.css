@@ -147,7 +147,7 @@
 }
 
 .timeline-event.axis-negative {
-    border-left-color: #d9534f;
+    border-left-color: var(--accent-primary);
 }
 
 .event-time {
@@ -186,7 +186,7 @@
 }
 
 .event-value.negative {
-    color: #d9534f;
+    color: var(--accent-primary);
 }
 
 .event-modifiers {
@@ -260,7 +260,7 @@
 }
 
 .event-type.axis-negative {
-    background: linear-gradient(135deg, #d9534f 0%, #c9302c 100%);
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-active) 100%);
     color: #fff;
 }
 
@@ -439,8 +439,8 @@
 }
 
 .device-status.disconnected {
-    background: rgba(217, 83, 79, 0.1);
-    color: #d9534f;
+    background: rgba(var(--accent-primary-rgb), 0.1);
+    color: var(--accent-primary);
 }
 
 /* Debug Info Styles */

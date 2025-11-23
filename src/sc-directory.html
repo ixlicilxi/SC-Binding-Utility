@@ -7,10 +7,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Star Citizen Directory - SC Joystick Mapper</title>
     <style>
+        body {
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+
         .directory-container {
             max-width: 900px;
             margin: 0 auto;
             padding: 2rem;
+            padding-top: 5rem;
         }
 
         .directory-header {
@@ -32,7 +38,7 @@
             border-radius: 8px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
-            border: 1px solid var(--bg-lightest);
+            border: 1px solid var(--bg-lighter);
             background: var(--bg-medium);
         }
 
@@ -230,7 +236,7 @@
 
         .save-all-container {
             background: var(--bg-darkest);
-            border: 1px solid var(--bg-lightest);
+            border: 1px solid var(--bg-lighter);
             display: flex;
             justify-content: center;
             padding: 1rem;

@@ -27,6 +27,145 @@ import
 } from './button-renderer.js';
 import { initializeTemplatePagesUI, refreshTemplatePagesUI } from './template-editor-v2.js';
 
+/**
+ * Migrate template from v1.0 to v1.1
+ * - Rename joystickNumber to devicePrefix
+ * - Convert joystickNumber value (integer) to devicePrefix (string like "js1", "js2")
+ * - Remove device-specific prefixes from button inputs (e.g., "js1_button3" becomes "button3")
+ * - Update template version to 1.1
+ */
+function migrateTemplateToV11(template)
+{
+    console.log('[Migration] Starting migration to v1.1...');
+
+    if (!template || typeof template !== 'object')
+    {
+        console.log('[Migration] Invalid template object');
+        return template;
+    }
+
+    let migrated = false;
+
+    // Migrate pages
+    if (template.pages && Array.isArray(template.pages))
+    {
+        template.pages.forEach((page, pageIndex) =>
+        {
+            // Check if page has old joystickNumber field
+            if (page.joystickNumber !== undefined && page.device_prefix === undefined && page.devicePrefix === undefined)
+            {
+                // Convert joystickNumber to device_prefix
+                const oldNumber = page.joystickNumber;
+                page.device_prefix = `js${oldNumber}`;
+                delete page.joystickNumber;
+                console.log(`[Migration] Page ${pageIndex} (${page.name}): joystickNumber ${oldNumber} -> device_prefix "${page.device_prefix}"`);
+                migrated = true;
+
+                // Remove prefixes from all button inputs
+                if (page.buttons && Array.isArray(page.buttons))
+                {
+                    page.buttons.forEach((button, buttonIndex) =>
+                    {
+                        if (button.inputs && typeof button.inputs === 'object')
+                        {
+                            Object.keys(button.inputs).forEach(key =>
+                            {
+                                const oldInput = button.inputs[key];
+                                if (typeof oldInput === 'string')
+                                {
+                                    // Remove prefix like "js1_", "js2_", "gp1_", etc.
+                                    const newInput = oldInput.replace(/^(js\d+|gp\d+)_/, '');
+                                    if (newInput !== oldInput)
+                                    {
+                                        button.inputs[key] = newInput;
+                                        console.log(`[Migration]   Button ${buttonIndex} (${button.name}): "${oldInput}" -> "${newInput}"`);
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+            // Also migrate devicePrefix (camelCase) to device_prefix (snake_case) for consistency
+            else if (page.devicePrefix !== undefined && page.device_prefix === undefined)
+            {
+                page.device_prefix = page.devicePrefix || '';
+                delete page.devicePrefix;
+                console.log(`[Migration] Page ${pageIndex} (${page.name}): devicePrefix -> device_prefix "${page.device_prefix}"`);
+                migrated = true;
+            }
+        });
+    }
+
+    // Also check legacy leftStick/rightStick structures
+    if (template.leftStick && typeof template.leftStick === 'object')
+    {
+        if (template.leftStick.joystickNumber !== undefined && template.leftStick.device_prefix === undefined)
+        {
+            template.leftStick.device_prefix = `js${template.leftStick.joystickNumber}`;
+            delete template.leftStick.joystickNumber;
+            migrated = true;
+
+            // Migrate buttons
+            if (Array.isArray(template.leftStick.buttons))
+            {
+                template.leftStick.buttons.forEach(button =>
+                {
+                    if (button.inputs)
+                    {
+                        Object.keys(button.inputs).forEach(key =>
+                        {
+                            const oldInput = button.inputs[key];
+                            if (typeof oldInput === 'string')
+                            {
+                                button.inputs[key] = oldInput.replace(/^(js\d+|gp\d+)_/, '');
+                            }
+                        });
+                    }
+                });
+            }
+        }
+    }
+
+    if (template.rightStick && typeof template.rightStick === 'object')
+    {
+        if (template.rightStick.joystickNumber !== undefined && template.rightStick.device_prefix === undefined)
+        {
+            template.rightStick.device_prefix = `js${template.rightStick.joystickNumber}`;
+            delete template.rightStick.joystickNumber;
+            migrated = true;
+
+            // Migrate buttons
+            if (Array.isArray(template.rightStick.buttons))
+            {
+                template.rightStick.buttons.forEach(button =>
+                {
+                    if (button.inputs)
+                    {
+                        Object.keys(button.inputs).forEach(key =>
+                        {
+                            const oldInput = button.inputs[key];
+                            if (typeof oldInput === 'string')
+                            {
+                                button.inputs[key] = oldInput.replace(/^(js\d+|gp\d+)_/, '');
+                            }
+                        });
+                    }
+                });
+            }
+        }
+    }
+
+    // Update version if migration occurred
+    if (migrated)
+    {
+        template.version = '1.1';
+        console.log('[Migration] Template migrated to v1.1');
+    }
+
+    return template;
+}
+
 // Lazy imports - will be loaded when needed
 let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat;
 
@@ -46,7 +185,6 @@ async function loadUtilities()
 // State
 let templateData = {
     name: '',
-    joystickModel: '',
     joystickNumber: 2, // Default to joystick 2 (for dual stick setups) - deprecated, use per-stick joystickNumber
     leftStick: { joystickNumber: 1, buttons: [] }, // Left stick config - deprecated, use pages instead
     rightStick: { joystickNumber: 2, buttons: [] }, // Right stick config - deprecated, use pages instead
@@ -104,20 +242,30 @@ function ensureTemplatePages()
 
     if (templateData.pages.length === 0)
     {
-        const leftPage = templateData.leftStick || { joystickNumber: 1, buttons: [] };
+        const leftPage = templateData.leftStick || { device_prefix: 'js1', buttons: [] };
         if (!leftPage.id)
         {
             leftPage.id = generatePageId();
         }
         leftPage.name = leftPage.name || 'Left Stick';
+        // Ensure device_prefix exists
+        if (!leftPage.device_prefix && !leftPage.devicePrefix && !leftPage.joystickNumber)
+        {
+            leftPage.device_prefix = 'js1';
+        }
         templateData.pages.push(leftPage);
 
-        const rightPage = templateData.rightStick || { joystickNumber: 2, buttons: [] };
+        const rightPage = templateData.rightStick || { device_prefix: 'js2', buttons: [] };
         if (!rightPage.id)
         {
             rightPage.id = generatePageId();
         }
         rightPage.name = rightPage.name || 'Right Stick';
+        // Ensure device_prefix exists
+        if (!rightPage.device_prefix && !rightPage.devicePrefix && !rightPage.joystickNumber)
+        {
+            rightPage.device_prefix = 'js2';
+        }
         templateData.pages.push(rightPage);
     }
     else
@@ -132,9 +280,10 @@ function ensureTemplatePages()
             {
                 page.buttons = [];
             }
-            if (page.joystickNumber === undefined)
+            // Only set joystickNumber if neither device_prefix nor joystickNumber exist
+            if (page.joystickNumber === undefined && page.device_prefix === undefined && page.devicePrefix === undefined)
             {
-                page.joystickNumber = index === 0 ? 1 : 2;
+                page.device_prefix = index === 0 ? 'js1' : 'js2';
             }
             if (!page.name)
             {
@@ -345,6 +494,13 @@ window.initializeTemplateEditor = function ()
     });
 
     window.addEventListener('resize', resizeCanvas);
+
+    // Listen for theme changes to refresh canvas
+    document.addEventListener('themechange', () =>
+    {
+        console.log('Theme changed, refreshing canvas...');
+        redraw();
+    });
 };
 
 function initializeEventListeners()
@@ -368,11 +524,7 @@ function initializeEventListeners()
         }
     });
 
-    document.getElementById('joystick-model').addEventListener('input', (e) =>
-    {
-        templateData.joystickModel = e.target.value;
-        markAsChanged();
-    });
+
 
     // Legacy image controls removed - per-page images now handled in template page modal
     document.getElementById('new-template-btn').addEventListener('click', newTemplate);
@@ -658,7 +810,18 @@ function getCurrentStickJoystickNumber()
 {
     const stickData = getCurrentStickData();
 
-    // For pages, use the joystickNumber field (same as stick data)
+    // For pages with devicePrefix (v1.1+), extract the number from the prefix
+    if (stickData && stickData.devicePrefix)
+    {
+        // Extract number from devicePrefix like "js1", "js2", "gp1", etc.
+        const match = stickData.devicePrefix.match(/\d+/);
+        if (match)
+        {
+            return parseInt(match[0], 10);
+        }
+    }
+
+    // Fallback to old joystickNumber field (v1.0)
     if (stickData && stickData.joystickNumber)
     {
         return stickData.joystickNumber;
@@ -689,9 +852,9 @@ function getInputDisplayInfo(button, jsNumOverride = null)
 
     const jsNum = jsNumOverride || getCurrentStickJoystickNumber();
 
-    // Get current page prefix
+    // Get current page devicePrefix (v1.1+) or device_prefix (v1.0)
     const currentPage = getCurrentPage();
-    const pagePrefix = currentPage ? currentPage.joystick_prefix : null;
+    const devicePrefix = currentPage ? (currentPage.devicePrefix || currentPage.device_prefix) : null;
 
     const normalizePrefix = (inputString) =>
     {
@@ -702,20 +865,22 @@ function getInputDisplayInfo(button, jsNumOverride = null)
 
         const lower = inputString.toLowerCase();
 
-        // If we have a page prefix, use it
-        if (pagePrefix)
+        // For v1.1+ templates with devicePrefix, prepend the prefix
+        if (devicePrefix)
         {
-            if (lower.match(/^(js|gp)\d+_/))
-            {
-                return lower.replace(/^(js|gp)\d+_/, `${pagePrefix}_`);
-            }
+            // If input already has a prefix, remove it first
+            const withoutPrefix = lower.replace(/^(js|gp)\d+_/, '');
+            return `${devicePrefix}_${withoutPrefix}`;
         }
 
+        // For v1.0 templates, use jsNum-based prefix
         if (lower.match(/^(js|gp)\d+_/))
         {
             return lower.replace(/^(js|gp)\d+_/, `js${jsNum}_`);
         }
-        return lower;
+
+        // If no prefix exists, add js{jsNum}_ prefix
+        return `js${jsNum}_${lower}`;
     };
 
     const setFromString = (inputString) =>
@@ -949,7 +1114,6 @@ async function newTemplate()
     // Reset all data
     templateData = {
         name: '',
-        joystickModel: '',
         joystickNumber: 2,
         leftStick: { joystickNumber: 1, buttons: [] },
         rightStick: { joystickNumber: 2, buttons: [] },
@@ -962,7 +1126,6 @@ async function newTemplate()
 
     // Reset UI
     document.getElementById('template-name').value = '';
-    document.getElementById('joystick-model').value = '';
 
     // Reset canvas
     loadedImage = null;
@@ -979,12 +1142,12 @@ async function newTemplate()
     switchStick('right');
     resizeCanvas();
 
-    // Clear localStorage
-    localStorage.removeItem('currentTemplate');
-    localStorage.removeItem('templateFileName');
-    localStorage.removeItem('templateFilePath');
-    localStorage.removeItem('leftStickCamera');
-    localStorage.removeItem('rightStickCamera');
+    // Clear editor-specific localStorage
+    localStorage.removeItem('editorCurrentTemplate');
+    localStorage.removeItem('editorTemplateFileName');
+    localStorage.removeItem('editorTemplateFilePath');
+    localStorage.removeItem('editorLeftStickCamera');
+    localStorage.removeItem('editorRightStickCamera');
     hasUnsavedChanges = false;
     currentTemplateFilePath = null; // Clear the file path for new template
     updateUnsavedIndicator();
@@ -1053,6 +1216,16 @@ function redraw()
     const buttons = getCurrentButtons();
     if (Array.isArray(buttons))
     {
+        // First pass: draw all connecting lines
+        buttons.forEach(button =>
+        {
+            if (button.labelPos)
+            {
+                drawConnectingLineOnly(button);
+            }
+        });
+
+        // Second pass: draw all buttons/markers/labels
         buttons.forEach(button =>
         {
             drawButton(button);
@@ -1077,37 +1250,47 @@ window.setLoadedImage = function (img)
     loadedImage = img;
 };
 
+// Helper function to draw only the connecting line for a button
+function drawConnectingLineOnly(button)
+{
+    const isHat = button.buttonType === 'hat4way';
+    const alpha = 1.0; // Full opacity for lines in first pass
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Get CSS variable colors
+    const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+    const bgLight = getComputedStyle(document.documentElement).getPropertyValue('--bg-light').trim();
+
+    let lineColor = accentPrimary; // Default to accent primary color
+
+    if (isHat)
+    {
+        // For hats, check if at least the four cardinal directions are bound
+        const hasCardinalDirections = button.inputs &&
+            button.inputs.up &&
+            button.inputs.down &&
+            button.inputs.left &&
+            button.inputs.right;
+
+        lineColor = hasCardinalDirections ? accentPrimary : bgLight; // Bound color if all cardinals exist, grey otherwise
+    }
+
+    // Use shared drawConnectingLine function
+    // Note: Need to scale offset for zoom level in template editor
+    const labelWidth = isHat ? 0 : 140;
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isHat);
+    ctx.restore();
+}
+
 function drawButton(button, isTemp = false)
 {
     const alpha = isTemp ? 0.7 : 1.0;
     const isHat = button.buttonType === 'hat4way';
 
-    // Draw line connecting button to label
-    if (button.labelPos)
-    {
-        ctx.save();
-        ctx.globalAlpha = alpha;
-
-        let lineColor = '#d9534f'; // Default to bound color
-
-        if (isHat)
-        {
-            // For hats, check if at least the four cardinal directions are bound
-            const hasCardinalDirections = button.inputs &&
-                button.inputs.up &&
-                button.inputs.down &&
-                button.inputs.left &&
-                button.inputs.right;
-
-            lineColor = hasCardinalDirections ? '#d9534f' : '#666'; // Bound color if all cardinals exist, grey otherwise
-        }
-
-        // Use shared drawConnectingLine function
-        // Note: Need to scale offset for zoom level in template editor
-        const labelWidth = isHat ? 0 : 140;
-        drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isHat);
-        ctx.restore();
-    }
+    // Note: Lines are now drawn in a separate pass before this function is called
+    // This ensures button frames are always drawn on top of lines
 
     // Draw button position marker using shared function
     ctx.save();
@@ -1132,13 +1315,14 @@ function drawButton(button, isTemp = false)
     if (button.id === selectedButtonId && !isTemp)
     {
         ctx.save();
-        ctx.strokeStyle = '#e67e72';
+        const accentHover = getComputedStyle(document.documentElement).getPropertyValue('--accent-hover').trim();
+        ctx.strokeStyle = accentHover;
         ctx.lineWidth = 3;
 
-        // Highlight the connecting line with brighter color
+        // Highlight the connecting line with hover color
         if (button.labelPos)
         {
-            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isHat ? 0 : ButtonFrameWidth / 2, '#9ae764ff', isHat);
+            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isHat ? 0 : ButtonFrameWidth / 2, accentHover, isHat);
         }
 
         // Highlight the label box border
@@ -1326,12 +1510,12 @@ function saveCameraPosition()
     if (currentStick === 'left')
     {
         leftStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
-        localStorage.setItem('leftStickCamera', JSON.stringify(leftStickCamera));
+        localStorage.setItem('editorLeftStickCamera', JSON.stringify(leftStickCamera));
     }
     else
     {
         rightStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
-        localStorage.setItem('rightStickCamera', JSON.stringify(rightStickCamera));
+        localStorage.setItem('editorRightStickCamera', JSON.stringify(rightStickCamera));
     }
 }
 
@@ -2422,29 +2606,14 @@ async function startHatInputDetection(direction)
             const currentStickData = currentPage || (currentStick === 'left' ? templateData.leftStick : templateData.rightStick);
             const templateJsNum = (currentStickData && currentStickData.joystickNumber) || templateData.joystickNumber || 1;
 
-            // For pages: use device_uuid to validate, for legacy sticks: use detectedJsNumber
-            const pageDeviceUuid = currentPage?.device_uuid;
-            const detectedDeviceUuid = result.device_uuid;
-
-            // Validate that input is from the configured device (if configured)
-            if (pageDeviceUuid && detectedDeviceUuid && pageDeviceUuid !== detectedDeviceUuid)
-            {
-                console.warn(`Input from device ${detectedDeviceUuid} but expected ${pageDeviceUuid}`);
-                const pageName = currentPage?.name || 'this page';
-                document.getElementById('hat-detection-status').textContent =
-                    `⚠️ That input is from a device not assigned to ${pageName}. Please use the device you configured for this page.`;
-                document.getElementById('hat-detection-status').style.color = '#f0ad4e';
-                return;
-            }
-
             let adjustedInputString = result.input_string;
 
             // Replace jsX_ with the current stick's template joystick number (js1 or js2)
             // OR use the page's explicit prefix if set (e.g. "js1", "gp1")
-            if (currentPage && currentPage.joystick_prefix)
+            if (currentPage && currentPage.device_prefix)
             {
-                adjustedInputString = adjustedInputString.replace(/^(js|gp)\d+_/, `${currentPage.joystick_prefix}_`);
-                console.log(`Adjusted input string for ${direction} using page prefix ${currentPage.joystick_prefix}:`, adjustedInputString);
+                adjustedInputString = adjustedInputString.replace(/^(js|gp)\d+_/, `${currentPage.device_prefix}_`);
+                console.log(`Adjusted input string for ${direction} using page prefix ${currentPage.device_prefix}:`, adjustedInputString);
             }
             else
             {
@@ -2535,7 +2704,7 @@ async function startHatInputDetection(direction)
         {
             btn.textContent = originalText;
             document.getElementById('hat-detection-status').textContent = 'Timeout - try again';
-            document.getElementById('hat-detection-status').style.color = '#d9534f';
+            document.getElementById('hat-detection-status').style.color = '#ef4444';
         }
     }
     catch (error)
@@ -2543,7 +2712,7 @@ async function startHatInputDetection(direction)
         console.error('Error detecting input:', error);
         btn.textContent = originalText;
         document.getElementById('hat-detection-status').textContent = `Error: ${error}`;
-        document.getElementById('hat-detection-status').style.color = '#d9534f';
+        document.getElementById('hat-detection-status').style.color = '#ef4444';
     }
     finally
     {
@@ -2604,29 +2773,14 @@ async function startInputDetection()
             const currentStickData = currentPage || (currentStick === 'left' ? templateData.leftStick : templateData.rightStick);
             const templateJsNum = (currentStickData && currentStickData.joystickNumber) || templateData.joystickNumber || 1;
 
-            // For pages: use device_uuid to validate, for legacy sticks: use detectedJsNumber
-            const pageDeviceUuid = currentPage?.device_uuid;
-            const detectedDeviceUuid = result.device_uuid;
-
-            // Validate that input is from the configured device (if configured)
-            if (pageDeviceUuid && detectedDeviceUuid && pageDeviceUuid !== detectedDeviceUuid)
-            {
-                console.warn(`Input from device ${detectedDeviceUuid} but expected ${pageDeviceUuid}`);
-                const pageName = currentPage?.name || 'this page';
-                document.getElementById('input-detection-status').textContent =
-                    `⚠️ That input is from a device not assigned to ${pageName}. Please use the device you configured for this page.`;
-                document.getElementById('input-detection-status').style.color = '#f0ad4e';
-                return;
-            }
-
             let adjustedInputString = result.input_string;
 
             // Replace jsX_ with the current stick's template joystick number (js1 or js2)
             // OR use the page's explicit prefix if set (e.g. "js1", "gp1")
-            if (currentPage && currentPage.joystick_prefix)
+            if (currentPage && currentPage.device_prefix)
             {
-                adjustedInputString = adjustedInputString.replace(/^(js|gp)\d+_/, `${currentPage.joystick_prefix}_`);
-                console.log(`Adjusted input string using page prefix ${currentPage.joystick_prefix}:`, adjustedInputString);
+                adjustedInputString = adjustedInputString.replace(/^(js|gp)\d+_/, `${currentPage.device_prefix}_`);
+                console.log(`Adjusted input string using page prefix ${currentPage.device_prefix}:`, adjustedInputString);
             }
             else
             {
@@ -2769,7 +2923,7 @@ async function startInputDetection()
         {
             // Timeout
             document.getElementById('input-detection-status').textContent = 'No input detected - timed out';
-            document.getElementById('input-detection-status').style.color = '#d9534f';
+            document.getElementById('input-detection-status').style.color = '#ef4444';
 
             // Clear any existing timeout
             if (inputDetectionTimeout !== null)
@@ -2789,7 +2943,7 @@ async function startInputDetection()
     {
         console.error('Error detecting input:', error);
         document.getElementById('input-detection-status').textContent = `Error: ${error}`;
-        document.getElementById('input-detection-status').style.color = '#d9534f';
+        document.getElementById('input-detection-status').style.color = '#ef4444';
     }
     finally
     {
@@ -2882,56 +3036,19 @@ function clearHatDirection(direction)
 // Helper function to prepare save data
 function prepareSaveData()
 {
-    // Helper to extract buttons array from stick (handles nested or flat structure)
-    const getStickButtons = (stick) =>
-    {
-        if (Array.isArray(stick)) return stick;
-        if (stick && stick.buttons && Array.isArray(stick.buttons)) return stick.buttons;
-        return [];
-    };
-
-    // Prepare data for saving with nested structure
+    // Prepare data for saving - only pages array is used now
     return {
         name: templateData.name,
-        joystickModel: templateData.joystickModel,
         version: templateData.version || '1.0',
         imageWidth: loadedImage ? loadedImage.width : 0,
         imageHeight: loadedImage ? loadedImage.height : 0,
-        leftStick: {
-            joystickNumber: templateData.leftStick.joystickNumber || 1,
-            buttons: getStickButtons(templateData.leftStick).map(b => ({
-                id: b.id,
-                name: b.name,
-                buttonPos: b.buttonPos,
-                labelPos: b.labelPos,
-                buttonType: b.buttonType || 'simple',
-                inputs: b.inputs || {},
-                // Legacy support
-                inputType: b.inputType,
-                inputId: b.inputId
-            }))
-        },
-        rightStick: {
-            joystickNumber: templateData.rightStick.joystickNumber || 2,
-            buttons: getStickButtons(templateData.rightStick).map(b => ({
-                id: b.id,
-                name: b.name,
-                buttonPos: b.buttonPos,
-                labelPos: b.labelPos,
-                buttonType: b.buttonType || 'simple',
-                inputs: b.inputs || {},
-                // Legacy support
-                inputType: b.inputType,
-                inputId: b.inputId
-            }))
-        },
         pages: Array.isArray(templateData.pages) ? templateData.pages.map(page => ({
             id: page.id,
             name: page.name || 'Untitled Page',
             device_uuid: page.device_uuid || '',
             device_name: page.device_name || '',
             joystickNumber: page.joystickNumber || 1,
-            joystick_prefix: page.joystick_prefix || '',
+            device_prefix: page.device_prefix || '',
             axis_profile: page.axis_profile || 'default',
             axis_mapping: page.axis_mapping || {},
             image_path: page.image_path || '',
@@ -2968,11 +3085,11 @@ async function performSave(filePath, showNotification = true)
         // Update current file path for future saves
         currentTemplateFilePath = filePath;
 
-        // Persist to localStorage
-        localStorage.setItem('currentTemplate', JSON.stringify(saveData));
+        // Persist to editor-specific localStorage
+        localStorage.setItem('editorCurrentTemplate', JSON.stringify(saveData));
         const fileName = filePath.split(/[\\\/]/).pop();
-        localStorage.setItem('templateFileName', fileName);
-        localStorage.setItem('templateFilePath', filePath);
+        localStorage.setItem('editorTemplateFileName', fileName);
+        localStorage.setItem('editorTemplateFilePath', filePath);
 
         // Clear unsaved changes
         hasUnsavedChanges = false;
@@ -3173,9 +3290,14 @@ async function loadTemplate()
         const templateJson = await invoke('load_template', { filePath });
         const data = JSON.parse(templateJson);
 
+        // Migrate template if needed (v1.0 -> v1.1)
+        if (data.version === '1.0' || !data.version)
+        {
+            migrateTemplateToV11(data);
+        }
+
         // Load the data - handle both old and new formats
         templateData.name = data.name || '';
-        templateData.joystickModel = data.joystickModel || '';
         templateData.joystickNumber = data.joystickNumber || 1;
 
         // Handle buttons: support multiple formats
@@ -3216,11 +3338,11 @@ async function loadTemplate()
         ensureTemplatePages();
         refreshTemplatePagesUI(templateData);
 
-        // Persist to localStorage
-        localStorage.setItem('currentTemplate', JSON.stringify(data));
+        // Persist to editor-specific localStorage
+        localStorage.setItem('editorCurrentTemplate', JSON.stringify(data));
         const fileName = filePath.split(/[\\\/]/).pop();
-        localStorage.setItem('templateFileName', fileName);
-        localStorage.setItem('templateFilePath', filePath);
+        localStorage.setItem('editorTemplateFileName', fileName);
+        localStorage.setItem('editorTemplateFilePath', filePath);
 
         // Set current file path for auto-save
         currentTemplateFilePath = filePath;
@@ -3244,7 +3366,6 @@ async function loadTemplate()
 
         // Update UI
         document.getElementById('template-name').value = templateData.name;
-        document.getElementById('joystick-model').value = templateData.joystickModel;
 
         // Load the first page's image if we have pages
         if (currentPageId && templateData.pages.length > 0)
@@ -3370,7 +3491,7 @@ function updateUnsavedIndicator()
         if (typeof hasUnsavedChanges !== 'undefined' && hasUnsavedChanges)
         {
             indicator.style.borderColor = 'var(--accent-primary)';
-            indicator.style.backgroundColor = 'rgba(217, 83, 79, 0.1)';
+            indicator.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
             if (!fileNameEl.textContent.includes('*'))
             {
                 fileNameEl.textContent += ' *';
@@ -3389,21 +3510,30 @@ function loadPersistedTemplate()
 {
     try
     {
-        const savedTemplate = localStorage.getItem('currentTemplate');
+        // Use editor-specific storage key to avoid interference from visual viewer
+        const savedTemplate = localStorage.getItem('editorCurrentTemplate');
         if (savedTemplate)
         {
             const data = JSON.parse(savedTemplate);
 
-            // Restore file path for auto-save functionality
-            const savedFilePath = localStorage.getItem('templateFilePath');
+            // Migrate template if needed (v1.0 -> v1.1)
+            if (data.version === '1.0' || !data.version)
+            {
+                migrateTemplateToV11(data);
+                // Save migrated template back to editor-specific localStorage
+                localStorage.setItem('editorCurrentTemplate', JSON.stringify(data));
+            }
+
+            // Restore file path for auto-save functionality (use editor-specific key)
+            const savedFilePath = localStorage.getItem('editorTemplateFilePath');
             if (savedFilePath)
             {
                 currentTemplateFilePath = savedFilePath;
             }
 
-            // Restore camera positions if available
-            const savedLeftCamera = localStorage.getItem('leftStickCamera');
-            const savedRightCamera = localStorage.getItem('rightStickCamera');
+            // Restore camera positions if available (use editor-specific keys)
+            const savedLeftCamera = localStorage.getItem('editorLeftStickCamera');
+            const savedRightCamera = localStorage.getItem('editorRightStickCamera');
 
             if (savedLeftCamera)
             {
@@ -3481,7 +3611,6 @@ function loadPersistedTemplate()
 
             // Update UI
             document.getElementById('template-name').value = templateData.name;
-            document.getElementById('joystick-model').value = templateData.joystickModel;
 
             // Load the first page's image if we have pages
             if (currentPageId && templateData.pages.length > 0)
@@ -3542,13 +3671,13 @@ function markAsChanged()
     hasUnsavedChanges = true;
     updateUnsavedIndicator();
 
-    // Also persist to localStorage for recovery
+    // Also persist to editor-specific localStorage for recovery
     try
     {
-        localStorage.setItem('currentTemplate', JSON.stringify(templateData));
-        // Also persist camera positions for each stick
-        localStorage.setItem('leftStickCamera', JSON.stringify(leftStickCamera));
-        localStorage.setItem('rightStickCamera', JSON.stringify(rightStickCamera));
+        localStorage.setItem('editorCurrentTemplate', JSON.stringify(templateData));
+        // Also persist camera positions for each stick using editor-specific keys
+        localStorage.setItem('editorLeftStickCamera', JSON.stringify(leftStickCamera));
+        localStorage.setItem('editorRightStickCamera', JSON.stringify(rightStickCamera));
     } catch (error)
     {
         console.error('Error persisting template changes:', error);

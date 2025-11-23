@@ -41,9 +41,36 @@ export class Tooltip
             left = window.innerWidth - tooltipRect.width - 10;
         }
 
+        // Calculate arrow position relative to the tooltip
+        // We want the arrow to point at the center of the element
+        const elementCenterX = rect.left + (rect.width / 2);
+        const tooltipLeftEdge = left;
+        const tooltipRightEdge = left + tooltipRect.width;
+
+        // Arrow position as percentage from the left edge of the tooltip
+        let arrowPercentage = 50; // default to center
+
+        if (elementCenterX >= tooltipLeftEdge && elementCenterX <= tooltipRightEdge)
+        {
+            // Element center is within tooltip bounds, calculate percentage
+            const elementOffsetInTooltip = elementCenterX - tooltipLeftEdge;
+            arrowPercentage = (elementOffsetInTooltip / tooltipRect.width) * 100;
+        }
+        else if (elementCenterX < tooltipLeftEdge)
+        {
+            // Element is to the left, clamp arrow to left side (with padding)
+            arrowPercentage = 15;
+        }
+        else
+        {
+            // Element is to the right, clamp arrow to right side (with padding)
+            arrowPercentage = 85;
+        }
+
         this.tooltip.classList.add(positionClass);
         this.tooltip.style.top = `${top}px`;
         this.tooltip.style.left = `${left}px`;
+        this.tooltip.style.setProperty('--arrow-position', `${arrowPercentage}%`);
 
         // Trigger reflow to enable transition
         void this.tooltip.offsetWidth;

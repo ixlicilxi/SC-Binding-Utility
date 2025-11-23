@@ -1,55 +1,83 @@
 {
-    "categories": [
-        {
-            "@ui_CCSeatGeneral": "General Seat Controls"
-        },
-        {
-            "@ui_CCSpaceFlight": "Space Flight Controls"
-        },
-        {
-            "@ui_CCOrientationControl": "Orientation Control"
-        },
-        {
-            "@ui_CCFlightModes": "Flight Modes"
-        },
-        {
-            "@ui_CCTurrets": "Turrets"
-        },
-        {
-            "@ui_CGLightControllerDesc": "Light Controller"
-        },
-        {
-            "@ui_CCFPS": "First Person Shooter Controls"
-        },
-        {
-            "@ui_CCEVA": "EVA Controls"
-        },
-        {
-            "@ui_CCEVAZGT": "EVA Zero Gravity Traversal"
-        },
-        {
-            "@ui_CCVehicle": "Vehicle Controls"
-        },
-        {
-            "@ui_CC_DriveModes": "Drive Modes"
-        },
-        {
-            "@ui_CGEASpectator": "Spectator Mode"
-        },
-        {
-            "@ui_CGUIGeneral": "General UI Controls"
-        },
-        {
-            "@ui_CGOpticalTracking": "Optical Tracking"
-        },
-        {
-            "@ui_CGInteraction": "Interaction"
-        },
-        {
-            "@ui_CCCamera": "Camera Controls"
-        },
-        {
-            "": "Uncategorized"
-        }
-    ]
+    "vehicle": "vehicle",
+    "@ui_CCSeatGeneral": "vehicle",
+    "@ui_CCVehicle": "vehicle",
+    "@ui_CCSpaceFlight": "vehicle",
+    "@ui_CGLightControllerDesc": ["vehicle", "vehicle - other"],
+    "@ui_CCTurrets": ["vehicle", "turrets"],
+    "turrets": ["vehicle", "turrets"],
+    "communication": "comms/social",
+    "other": "other",
+    "camera": "camera",
+    "@ui_CCCamera": "camera",
+    "on foot": "on foot",
+    "@ui_CCFPS": ["on foot"],
+    "@ui_CCEVA": ["on foot", "eva"],
+    "zero_gravity_eva": ["on foot", "eva"],
+    "zero_gravity_traversal": ["on foot", "eva"],
+    "@ui_CCEVAZGT": ["on foot", "eva"],
+    "@ui_CGInteraction": ["other", "interaction"],
+    "player_choice": ["other", "interaction"],
+    "salvage": "salvage",
+    "mining": "mining",
+    "vehicle control": "vehicle control",
+    "defences": "defences",
+    "weapons": "weapons",
+    "power": "power",
+    "combat": "combat",
+    "equipment": "equipment",
+    "@ui_CGEASpectator": ["other", "spectator"],
+    "spectator": ["other", "spectator"],
+    "default": ["other"],
+    "@ui_CGUIGeneral": "other",
+    "ui_notification": "other",
+    "@ui_CGOpticalTracking": ["other", "optical tracking", "foip/voip"],
+    "player_input_optical_tracking": ["other", "optical tracking", "foip/voip"],
+    "mfds": ["vehicle", "mfds"],
+    "MFDs": ["vehicle", "mfds"],
+    "Emotes": ["comms/social", "emotes"],
+    "none": "none",
+    "vehicle - other": "vehicle - other",
+    "ShipSystems": ["vehicle", "systems"],
+    "FlightSystems": ["vehicle", "systems"],
+    "spaceship_radar": ["vehicle", "systems"],
+    "spaceship_scanning": ["vehicle", "systems"],
+    "lights_controller": ["vehicle", "systems", "vehicle - other"],
+    "spaceship_hud": ["vehicle", "vehicle - other"],
+    "RemoteTurret": ["turrets", "remote turrets"],
+    "MobiGlasActions": ["mobiglas", "other"],
+    "WeaponSelection": ["on foot", "combat"],
+    "tractor_beam": ["on foot", "equipment"],
+    "MiningMode": ["vehicle", "mining"],
+    "WeaponSystems": ["vehicle", "weapons"],
+    "ItemActions": ["on foot"],
+    "prone": ["on foot"],
+    "player": ["on foot"],
+    "incapacitated": ["on foot", "on foot - other"],
+    "VehicleActions": ["vehicle"],
+    "PlayerActions": " ",
+    "Notifications": "other",
+    "seat_general": ["vehicle"],
+    "spaceship_general": ["vehicle"],
+    "spaceship_mining": ["vehicle", "mining"],
+    "spaceship_weapons": ["vehicle", "weapons"],
+    "spaceship_missiles": ["vehicle", "weapons"],
+    "spaceship_defensive": ["vehicle", "defences"],
+    "spaceship_power": ["vehicle", "power"],
+    "vehicle_mfd": ["vehicle", "mfds"],
+    "vehicle_driver": ["vehicle"],
+    "vehicle_general": ["vehicle"],
+    "spaceship_salvage": ["vehicle", "salvage"],
+    "spaceship_movement": ["vehicle", "movement"],
+    "spaceship_quantum": ["vehicle", "movement"],
+    "spaceship_docking": ["vehicle", "movement"],
+    "spaceship_view": ["vehicle", "vehicle - other"],
+    "stopwatch": ["vehicle", "vehicle - other"],
+    "spaceship_targeting": ["vehicle", "targeting"],
+    "spaceship_targeting_advanced": ["vehicle", "targeting"],
+    "turret_movement": ["vehicle", "turrets"],
+    "turret_advanced": ["vehicle", "turrets"],
+    "player_emotes": ["comms/social", "emotes"],
+    "spaceship_target_hailing": ["vehicle", "targeting", "vehicle - other", "comms/social", "comms - other"],
+    "view_director_mode": ["camera"]
 }

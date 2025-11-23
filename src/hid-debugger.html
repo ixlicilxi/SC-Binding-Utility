@@ -26,9 +26,17 @@
 
 <body>
     <div class="app-container">
-        <header>
-            <h1>🔬 HID Raw Data Debugger</h1>
-            <p>Deep dive into USB HID reports to diagnose missing axes (Rx, Ry, Slider)</p>
+        <header class="hid-header">
+            <button id="back-to-main" class="btn-back" title="Back to Main View">
+                <span class="back-arrow">←</span> Back
+            </button>
+            <div class="header-content">
+                <h1>🔬 HID Raw Data Debugger</h1>
+                <p>Deep dive into USB HID reports to diagnose missing axes (Rx, Ry, Slider)</p>
+            </div>
+            <button class="theme-switcher" id="theme-switcher" title="Toggle Theme">
+                <span class="theme-switcher-icon">🎨</span>
+            </button>
         </header>
 
         <div class="container">
@@ -117,6 +125,7 @@
         </div>
     </div>
 
+    <script type="module" src="theme-switcher.js"></script>
     <script type="module" src="hid-debugger.js"></script>
 </body>
 

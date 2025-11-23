@@ -234,12 +234,15 @@ export class CustomDropdown
         this.menu.style.display = 'block';
         this.button.setAttribute('aria-expanded', 'true');
         this.button.classList.add('open');
+        this.wrapper.classList.add('open');
 
         // Calculate position for fixed menu
         const rect = this.button.getBoundingClientRect();
-        this.menu.style.top = (rect.bottom) + 'px';
-        this.menu.style.left = rect.left + 'px';
-        this.menu.style.width = rect.width + 'px';
+
+        // Get menu dimensions
+        const menuWidth = rect.width; // Match button width exactly
+
+        this.menu.style.width = menuWidth + 'px';
     }
 
     close()
@@ -248,6 +251,7 @@ export class CustomDropdown
         this.menu.style.display = 'none';
         this.button.setAttribute('aria-expanded', 'false');
         this.button.classList.remove('open');
+        this.wrapper.classList.remove('open');
         this.hideHoverTooltip();
     }
 

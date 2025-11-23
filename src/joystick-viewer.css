@@ -3,7 +3,7 @@
     position: absolute;
     top: 1rem;
     right: 1rem;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-size: 0.9rem;
     font-weight: 500;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
@@ -18,7 +18,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
-    background-color: var(--bg-darkest);
+    background-color: transparent;
     position: relative;
     z-index: 1;
 }
@@ -33,7 +33,7 @@
     overflow: visible;
 }
 
-.welcome-screen {
+.welcome-screen-visual {
     position: absolute;
     top: 0;
     left: 0;
@@ -61,6 +61,7 @@
     left: 0;
     width: 100%;
     height: 100%;
+    background-color: transparent;
 }
 
 /* Floating Control Toolbar */
@@ -68,9 +69,9 @@
     position: absolute;
     top: 1rem;
     left: 1rem;
-    background: rgba(20, 24, 28, 0.95);
+    background: rgba(var(--accent-primary-rgb), 0.05);
     backdrop-filter: blur(10px);
-    border: 1px solid #444;
+    border: 1px solid var(--bg-lighter);
     border-radius: 8px;
     padding: 0.75rem;
     display: flex;
@@ -89,37 +90,8 @@
 .control-divider {
     width: 1px;
     height: 28px;
-    background: #444;
+    background: var(--bg-light);
     margin: 0 0.25rem;
-}
-
-.control-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    padding: 0.5rem 0.75rem;
-    background: rgba(40, 44, 48, 0.7);
-    border: 1px solid #555;
-    border-radius: 5px;
-    color: #ccc;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.85rem;
-    white-space: nowrap;
-    font-weight: 500;
-}
-
-.control-btn:hover {
-    background: rgba(50, 54, 58, 0.9);
-    border-color: #666;
-    color: #fff;
-}
-
-.control-btn.active {
-    background: rgba(78, 201, 176, 0.2);
-    border-color: #4ec9b0;
-    color: #4ec9b0;
 }
 
 .control-icon {
@@ -203,7 +175,7 @@
 .control-divider {
     width: 1px;
     height: 30px;
-    background: #444;
+    background: var(--bg-light);
     margin: 0 0.25rem;
 }
 
@@ -214,10 +186,10 @@
     justify-content: center;
     gap: 0.2rem;
     padding: 0.5rem 0.75rem;
-    background: rgba(40, 44, 48, 0.6);
-    border: 1px solid #555;
+    background: var(--bg-medium-light);
+    border: 1px solid var(--bg-lighter);
     border-radius: 6px;
-    color: #ccc;
+    color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.2s ease;
     min-width: 60px;
@@ -225,14 +197,14 @@
 
 .control-btn:hover {
     background: rgba(50, 54, 58, 0.8);
-    border-color: #666;
-    color: #fff;
+    border-color: var(--text-muted);
+    color: var(--accent-primary);
 }
 
 .control-btn.active {
-    background: rgba(78, 201, 176, 0.2);
-    border-color: #4ec9b0;
-    color: #4ec9b0;
+    background: var(--bg-light);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
 }
 
 .control-icon {
@@ -273,7 +245,7 @@
     position: absolute;
     top: 20px;
     right: 20px;
-    border: 2px solid #343a42;
+    border: 2px solid var(--bg-light);
     border-radius: 8px;
     padding: 0;
     min-width: 280px;
@@ -290,21 +262,21 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.75rem 1rem;
-    background: rgb(22 26 31);
-    border-bottom: 1px solid #343a42;
+    background: var(--bg-darkest);
+    border-bottom: 1px solid var(--bg-light);
 }
 
 .binding-info-header h3 {
     margin: 0;
     font-size: 1rem;
-    color: #d9534f;
+    color: var(--accent-primary);
     font-weight: 600;
 }
 
 .binding-info-close {
     background: none;
     border: none;
-    color: #d9534f;
+    color: var(--accent-primary);
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
@@ -319,13 +291,13 @@
 }
 
 .binding-info-close:hover {
-    background-color: rgba(217, 83, 79, 0.2);
+    background-color: rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .binding-info-details {
     padding: 0.5rem 1rem;
-    background: #1a1e24;
-    border-bottom: 1px solid #343a42;
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--bg-light);
     font-size: 0.85rem;
     color: var(--text-secondary);
 }
@@ -338,7 +310,7 @@
 
 .binding-info-id code {
     background: var(--bg-dark);
-    color: #4ec9b0;
+    color: var(--accent-primary);
     padding: 0.2rem 0.5rem;
     border-radius: 3px;
     font-family: 'Consolas', 'Monaco', monospace;
@@ -349,14 +321,14 @@
     padding: 0.5rem;
     max-height: calc(60vh - 60px);
     overflow-y: auto;
-    background: #161a1f;
+    background: var(--bg-darkest);
 }
 
 .binding-info-item {
     padding: 0.75rem;
     margin-bottom: 0.5rem;
     background: rgba(30, 30, 30, 0.6);
-    border-left: 3px solid #4ec9b0;
+    border-left: 3px solid var(--accent-primary);
     border-radius: 4px;
 }
 
@@ -366,20 +338,20 @@
 
 .binding-info-action {
     font-weight: 600;
-    color: #4ec9b0;
+    color: var(--accent-primary);
     font-size: 0.95rem;
     margin-bottom: 0.25rem;
 }
 
 .binding-info-category {
     font-size: 0.8rem;
-    color: #888;
+    color: var(--text-muted);
     font-style: italic;
 }
 
 .binding-info-activation {
     font-size: 0.75rem;
-    color: #aaa;
+    color: var(--text-secondary);
     text-transform: capitalize;
     margin-top: 0.15rem;
 }
@@ -393,7 +365,7 @@
     left: 1rem;
     background: rgba(20, 24, 28, 0.95);
     backdrop-filter: blur(10px);
-    border: 1px solid #444;
+    border: 1px solid var(--bg-light);
     border-radius: 8px;
     padding: 0.5rem 1rem;
     display: flex;
@@ -405,7 +377,7 @@
 
 .toolbar-label {
     font-size: 0.85rem;
-    color: #aaa;
+    color: var(--text-secondary);
     font-weight: 500;
     white-space: nowrap;
 }
@@ -422,7 +394,7 @@
     cursor: pointer;
     padding: 0.35rem 0.65rem;
     background: rgba(40, 44, 48, 0.6);
-    border: 1px solid #555;
+    border: 1px solid var(--bg-lighter);
     border-radius: 5px;
     transition: all 0.2s ease;
     user-select: none;
@@ -430,7 +402,7 @@
 
 .modifier-radio:hover {
     background: rgba(50, 54, 58, 0.8);
-    border-color: #666;
+    border-color: var(--text-muted);
 }
 
 .modifier-radio input[type="radio"] {
@@ -438,22 +410,22 @@
 }
 
 .modifier-radio input[type="radio"]:checked+span {
-    color: #4ec9b0;
+    color: var(--accent-primary);
     font-weight: 600;
 }
 
 .modifier-radio input[type="radio"]:checked~* {
-    color: #4ec9b0;
+    color: var(--accent-primary);
 }
 
 .modifier-radio:has(input[type="radio"]:checked) {
-    background: rgba(78, 201, 176, 0.15);
-    border-color: #4ec9b0;
+    background: rgba(var(--accent-primary-rgb), 0.15);
+    border-color: var(--accent-primary);
 }
 
 .modifier-radio span {
     font-size: 0.8rem;
-    color: #ccc;
+    color: var(--text-secondary);
     transition: color 0.2s ease;
     white-space: nowrap;
 }
@@ -463,12 +435,12 @@
     position: fixed;
     top: 5rem;
     right: 2rem;
-    background: rgba(78, 201, 176, 0.95);
+    background: var(--accent-primary);
     color: #0f1215;
     padding: 1rem 1.5rem;
     border-radius: 8px;
     font-weight: 600;
-    box-shadow: 0 4px 20px rgba(78, 201, 176, 0.4);
+    box-shadow: 0 4px 20px rgba(var(--accent-primary-rgb), 0.4);
     z-index: 10000;
     animation: slideIn 0.3s ease;
 }

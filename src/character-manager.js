@@ -22,15 +22,15 @@ class CharacterManager
         // Load saved library path
         this.libraryPath = localStorage.getItem('characterLibraryPath');
 
-        // Load SC installations first
-        await this.loadInstallations();
-
-        // Then load master characters (so sync status can be checked)
+        // Load master characters first (so sync status can be checked when rendering installations)
         if (this.libraryPath)
         {
             this.updateLibraryPathDisplay();
             await this.loadMasterCharacters();
         }
+
+        // Load SC installations after master characters are ready
+        await this.loadInstallations();
 
         // Setup event listeners
         this.setupEventListeners();
@@ -140,7 +140,7 @@ class CharacterManager
         const scDirectory = localStorage.getItem('scInstallDirectory');
         if (!scDirectory)
         {
-            this.renderEmptyInstallations();
+            this.renderEmptyInstallations('not-configured');
             return;
         }
 
@@ -421,13 +421,29 @@ class CharacterManager
 
         if (tabsEl)
         {
-            tabsEl.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">🔍</div>
-          <h3>${message || 'No Installations Found'}</h3>
-          <p>${message ? '' : 'Configure your SC directory in Auto Save Settings to detect installations'}</p>
-        </div>
-      `;
+            if (message === 'not-configured')
+            {
+                tabsEl.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">⚠️</div>
+            <h3>Star Citizen Installation Not Configured</h3>
+            <p>To manage character appearances across installations, you need to configure your Star Citizen installation directory.</p>
+            <button class="btn btn-primary" onclick="window.switchTab('settings')" style="margin-top: 1rem;">
+              Go to Settings
+            </button>
+          </div>
+        `;
+            }
+            else
+            {
+                tabsEl.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <h3>${message || 'No Installations Found'}</h3>
+            <p>${message ? '' : 'Configure your SC directory in Settings to detect installations'}</p>
+          </div>
+        `;
+            }
         }
 
         if (contentEl)

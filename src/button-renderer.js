@@ -154,7 +154,10 @@ export function drawConnectingLine(ctx, buttonPos, labelPos, boxHalfWidth, lineC
 export function drawButtonMarker(ctx, buttonPos, zoom, hasBinding = false, isHat = false)
 {
     const handleSize = isHat ? 6 : (7 / zoom);
-    ctx.fillStyle = hasBinding ? '#d9534f' : '#666';
+    // Get CSS variable colors
+    const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+    const bgLight = getComputedStyle(document.documentElement).getPropertyValue('--bg-light').trim();
+    ctx.fillStyle = hasBinding ? accentPrimary : bgLight;
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 2 / zoom;
     ctx.beginPath();
@@ -206,7 +209,8 @@ export function drawButtonBox(ctx, x, y, title, contentLines = [], compact = fal
     ctx.stroke();
 
     // Track clickable area if callback is provided
-    if (hasBinding && buttonData && mode === 'normal' && onClickableBox)
+    // Allow clicking on buttons even if they have no bindings to view the button ID
+    if (buttonData && mode === 'normal' && onClickableBox)
     {
         onClickableBox({
             x: boxX,

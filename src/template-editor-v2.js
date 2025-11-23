@@ -1,3 +1,5 @@
+import { CustomDropdown } from './custom-dropdown.js';
+
 const DEFAULT_TEMPLATE_V2 = {
     name: '',
     version: '2.0',
@@ -13,25 +15,19 @@ const RAW_AXIS_RANGE = Array.from({ length: 8 }, (_, index) => index);
 const state = {
     template: cloneDeep(DEFAULT_TEMPLATE_V2),
     selectedPageId: null,
-    devices: [],
     modalEditingPageId: null,
     modalCustomMapping: {},
     modalImagePath: '',
     modalImageDataUrl: null,
     initialized: false,
-    // Detection state
-    isDetectingDevice: false,
-    deviceDetectionSessionId: null,
-    detectedDeviceUuid: null,
-    detectedDeviceName: null,
+    // Axis detection state
     isDetectingAxis: false,
     axisDetectionSessionId: null,
     axisDetectionIntervalId: null,
     lastAxisValues: {},
     lastAxisUpdateTime: {},
     axisBitDepths: new Map(), // Track bit depths per axis
-    // HID axis names from descriptor
-    detectedAxisNames: {}, // Map of axis_index -> axis_name from HID descriptor
+    hidDevicePath: null,
     cachedDescriptor: null // Cached HID descriptor bytes for axis detection
 };
 
@@ -43,15 +39,7 @@ const dom = {
     pageModalTitle: null,
     pageNameInput: null,
     pagePrefixSelect: null,
-    pageDeviceSelect: null,
-    detectDeviceBtn: null,
-    detectedDeviceInfo: null,
-    detectedDeviceName: null,
-    detectedDeviceUuid: null,
-    deviceDetectionStatus: null,
-    // axisProfileSelect: REMOVED - now using HID descriptors exclusively
-    axisSummary: null,
-    openCustomAxisBtn: null,
+    devicePrefixDropdown: null,
     pageSaveBtn: null,
     pageCancelBtn: null,
     pageDeleteBtn: null,
@@ -103,6 +91,96 @@ function generatePageId()
     return `page_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 }
 
+/**
+ * Migrate template from v1.0 to v1.1
+ * - Rename joystickNumber to devicePrefix
+ * - Convert joystickNumber value (integer) to devicePrefix (string like "js1", "js2")
+ * - Remove device-specific prefixes from button inputs (e.g., "js1_button3" becomes "button3")
+ * - Update template version to 1.1
+ */
+function migrateTemplateToV11(template)
+{
+    console.log('[Migration] Starting migration to v1.1...');
+
+    if (!template.pages || !Array.isArray(template.pages))
+    {
+        console.log('[Migration] No pages to migrate');
+        return template;
+    }
+
+    let migrated = false;
+
+    template.pages.forEach((page, pageIndex) =>
+    {
+        // Check if page has old joystickNumber field
+        if (page.joystickNumber !== undefined && page.device_prefix === undefined && page.devicePrefix === undefined)
+        {
+            // Convert joystickNumber to device_prefix
+            const oldNumber = page.joystickNumber;
+            page.device_prefix = `js${oldNumber}`;
+            delete page.joystickNumber;
+            console.log(`[Migration] Page ${pageIndex} (${page.name}): joystickNumber ${oldNumber} -> device_prefix "${page.device_prefix}"`);
+            migrated = true;
+
+            // Remove prefixes from all button inputs
+            if (page.buttons && Array.isArray(page.buttons))
+            {
+                page.buttons.forEach((button, buttonIndex) =>
+                {
+                    if (button.inputs && typeof button.inputs === 'object')
+                    {
+                        Object.keys(button.inputs).forEach(key =>
+                        {
+                            const oldInput = button.inputs[key];
+                            if (typeof oldInput === 'string')
+                            {
+                                // Remove prefix like "js1_", "js2_", "gp1_", etc.
+                                const newInput = oldInput.replace(/^(js\d+|gp\d+)_/, '');
+                                if (newInput !== oldInput)
+                                {
+                                    button.inputs[key] = newInput;
+                                    console.log(`[Migration]   Button ${buttonIndex} (${button.name}): "${oldInput}" -> "${newInput}"`);
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        }
+        // Also migrate devicePrefix (camelCase) to device_prefix (snake_case) for consistency
+        else if (page.devicePrefix !== undefined && page.device_prefix === undefined)
+        {
+            page.device_prefix = page.devicePrefix || '';
+            delete page.devicePrefix;
+            console.log(`[Migration] Page ${pageIndex} (${page.name}): devicePrefix -> device_prefix "${page.device_prefix}"`);
+            migrated = true;
+        }
+    });
+
+    // Also check legacy leftStick/rightStick structures
+    if (template.leftStick?.joystickNumber !== undefined)
+    {
+        template.leftStick.device_prefix = `js${template.leftStick.joystickNumber}`;
+        delete template.leftStick.joystickNumber;
+        migrated = true;
+    }
+    if (template.rightStick?.joystickNumber !== undefined)
+    {
+        template.rightStick.device_prefix = `js${template.rightStick.joystickNumber}`;
+        delete template.rightStick.joystickNumber;
+        migrated = true;
+    }
+
+    // Update version if migration occurred
+    if (migrated)
+    {
+        template.version = '1.1';
+        console.log('[Migration] Template migrated to v1.1');
+    }
+
+    return template;
+}
+
 function invertProfile(profile)
 {
     const inverted = {};
@@ -114,12 +192,6 @@ function invertProfile(profile)
         }
     });
     return inverted;
-}
-
-function getSelectedDevice(deviceUuid)
-{
-    if (!deviceUuid) return null;
-    return state.devices.find(device => device.uuid === deviceUuid) || null;
 }
 
 function describeAxisMapping(page)
@@ -137,93 +209,6 @@ function describeAxisMapping(page)
         .join(', ');
     const more = entries.length > 4 ? ` +${entries.length - 4} more` : '';
     return `Axis mapping: ${summary}${more}`;
-}
-
-async function refreshDevices()
-{
-    const invoke = getInvoke();
-    if (!invoke)
-    {
-        state.devices = [];
-        populateDeviceSelect();
-        return;
-    }
-    try
-    {
-        const devices = await invoke('get_connected_devices');
-        state.devices = Array.isArray(devices) ? devices : [];
-    } catch (error)
-    {
-        console.error('Failed to load devices', error);
-        state.devices = [];
-    }
-    populateDeviceSelect();
-}
-
-async function handleRefreshDevices()
-{
-    const refreshBtn = document.getElementById('refresh-devices-btn');
-    if (!refreshBtn) return;
-
-    // Add loading state
-    const originalText = refreshBtn.textContent;
-    refreshBtn.textContent = '⏳';
-    refreshBtn.disabled = true;
-
-    try
-    {
-        // Store the currently selected device UUID before refresh
-        const selectedUuid = dom.pageDeviceSelect?.value;
-
-        // Refresh devices list
-        await refreshDevices();
-
-        // Re-select the device by UUID if it was previously selected
-        if (selectedUuid && dom.pageDeviceSelect)
-        {
-            dom.pageDeviceSelect.value = selectedUuid;
-            // Trigger change event to sync the display
-            dom.pageDeviceSelect.dispatchEvent(new Event('change'));
-        }
-
-        // Reset button to show success
-        refreshBtn.textContent = '✓';
-        setTimeout(() =>
-        {
-            refreshBtn.textContent = originalText;
-            refreshBtn.disabled = false;
-        }, 1500);
-    } catch (error)
-    {
-        console.error('Error refreshing devices:', error);
-        refreshBtn.textContent = '✗';
-        setTimeout(() =>
-        {
-            refreshBtn.textContent = originalText;
-            refreshBtn.disabled = false;
-        }, 1500);
-    }
-}
-
-function populateDeviceSelect()
-{
-    if (!dom.pageDeviceSelect) return;
-    const options = [`<option value="">— Select a device —</option>`];
-    if (state.devices.length === 0)
-    {
-        options.push('<option disabled value="__none">No devices detected</option>');
-    }
-    state.devices.forEach(device =>
-    {
-        options.push(`<option value="${device.uuid}">${device.name} (${device.axis_count} axes)</option>`);
-    });
-    dom.pageDeviceSelect.innerHTML = options.join('');
-
-    // Sync with detected device if available
-    if (state.detectedDeviceUuid)
-    {
-        dom.pageDeviceSelect.value = state.detectedDeviceUuid;
-    }
 }
 
 function renderPageList()
@@ -305,51 +290,20 @@ function openPageModal(pageId = null)
     state.modalCustomMapping = {};
     state.modalImagePath = '';
     state.modalImageDataUrl = null;
-    state.detectedDeviceUuid = null;
-    state.detectedDeviceName = null;
-    state.detectedAxisNames = {};
-
-    // Refresh devices list when modal opens
-    refreshDevices();
 
     if (pageId)
     {
         const page = state.template.pages.find(p => p.id === pageId);
         if (page)
         {
-            dom.pageModalTitle.textContent = `Edit Page: ${page.name || 'Untitled Page'}`;
+            dom.pageModalTitle.textContent = `Edit Device: ${page.name || 'Untitled Page'}`;
             dom.pageNameInput.value = page.name || '';
-            if (dom.pagePrefixSelect) dom.pagePrefixSelect.value = page.joystick_prefix || '';
 
-            // Show existing device info
-            state.detectedDeviceUuid = page.device_uuid;
-            state.detectedDeviceName = page.device_name;
-            if (page.device_name)
+            // Set devicePrefix dropdown value
+            if (dom.devicePrefixDropdown)
             {
-                dom.detectedDeviceName.textContent = page.device_name;
-                dom.detectedDeviceUuid.textContent = `UUID: ${page.device_uuid || 'Unknown'}`;
-                dom.detectedDeviceUuid.style.display = 'block';
-                dom.detectedDeviceInfo.classList.add('detected');
-                // Set dropdown value
-                if (dom.pageDeviceSelect && page.device_uuid)
-                {
-                    dom.pageDeviceSelect.value = page.device_uuid;
-                }
-
-                // Load axis names for this device
-                loadAxisNamesForDevice(page.device_name);
-            }
-            else
-            {
-                dom.detectedDeviceName.textContent = 'No device detected';
-                dom.detectedDeviceUuid.style.display = 'none';
-                dom.detectedDeviceInfo.classList.remove('detected');
-                if (dom.pageDeviceSelect)
-                {
-                    dom.pageDeviceSelect.value = '';
-                }
-                // Clear axis names
-                state.detectedAxisNames = {};
+                const prefix = page.devicePrefix || page.device_prefix || '';
+                dom.devicePrefixDropdown.setValue(prefix);
             }
 
             state.modalCustomMapping = cloneDeep(page.axis_mapping || {});
@@ -376,11 +330,12 @@ function openPageModal(pageId = null)
     {
         dom.pageModalTitle.textContent = 'Add Page';
         dom.pageNameInput.value = '';
-        if (dom.pagePrefixSelect) dom.pagePrefixSelect.value = '';
-        dom.detectedDeviceName.textContent = 'No device detected';
-        dom.detectedDeviceUuid.style.display = 'none';
-        dom.detectedDeviceInfo.classList.remove('detected');
-        // Axis profile is now determined from HID descriptor, not from dropdown
+
+        // Reset devicePrefix dropdown to default
+        if (dom.devicePrefixDropdown)
+        {
+            dom.devicePrefixDropdown.setValue('');
+        }
 
         // Clear image info
         if (dom.pageImageInfo) dom.pageImageInfo.textContent = '';
@@ -391,13 +346,7 @@ function openPageModal(pageId = null)
         if (dom.pageMirrorSelect) dom.pageMirrorSelect.value = '';
 
         dom.pageDeleteBtn.style.display = 'none';
-        if (dom.pageDeviceSelect)
-        {
-            dom.pageDeviceSelect.value = '';
-        }
     }
-
-    dom.deviceDetectionStatus.textContent = 'Press any button on your joystick or gamepad to identify it.';
 
     // Add input listener to update modal title as user types page name
     dom.pageNameInput.removeEventListener('input', updatePageModalTitle);
@@ -419,33 +368,18 @@ function updatePageModalTitle()
 function closePageModal()
 {
     if (!dom.pageModal) return;
-    stopDeviceDetection();
     dom.pageModal.style.display = 'none';
     state.modalEditingPageId = null;
     state.modalCustomMapping = {};
-    state.detectedDeviceUuid = null;
-    state.detectedDeviceName = null;
 }
 
 function savePageFromModal()
 {
     const name = dom.pageNameInput.value.trim() || 'Untitled Page';
-    const joystickPrefix = dom.pagePrefixSelect ? dom.pagePrefixSelect.value : '';
 
-    // Use detected device if available, otherwise fall back to dropdown selection
-    let deviceUuid = state.detectedDeviceUuid || '';
-    let deviceName = state.detectedDeviceName || '';
+    // Get devicePrefix from CustomDropdown
+    const devicePrefix = dom.devicePrefixDropdown ? dom.devicePrefixDropdown.getValue() : '';
 
-    // If no device was detected but user selected from dropdown, use that
-    if (!deviceUuid && dom.pageDeviceSelect && dom.pageDeviceSelect.value)
-    {
-        deviceUuid = dom.pageDeviceSelect.value;
-        const selectedDevice = state.devices.find(d => d.uuid === deviceUuid);
-        if (selectedDevice)
-        {
-            deviceName = selectedDevice.name;
-        }
-    }
     // Always use custom mapping (from HID descriptor or user configuration)
     const axisMapping = cloneDeep(state.modalCustomMapping || {});
 
@@ -460,50 +394,44 @@ function savePageFromModal()
         if (page)
         {
             // Check if prefix changed
-            const oldPrefix = page.joystick_prefix || '';
-            const newPrefix = joystickPrefix || '';
+            const oldPrefix = page.device_prefix || page.devicePrefix || '';
+            const newPrefix = devicePrefix || '';
 
             page.name = name;
-            page.joystick_prefix = joystickPrefix;
-            page.device_uuid = deviceUuid;
-            page.device_name = deviceName;
+            page.device_prefix = devicePrefix; // Use snake_case to match JSON format
             page.axis_mapping = axisMapping;
             page.image_path = imagePath;
             page.image_data_url = imageDataUrl;
             page.mirror_from_page_id = mirrorFromPageId;
 
             // If prefix changed, update all existing button inputs
-            // Also enforce if a prefix is set, to ensure all buttons match
-            if (oldPrefix !== newPrefix || newPrefix)
+            // Note: With new format, buttons no longer have prefixes in their input names
+            // The devicePrefix is prepended when looking up bindings
+            // So we need to strip any existing prefixes from buttons
+            if (page.buttons && page.buttons.length > 0)
             {
-                // If new prefix is set, use it. Otherwise revert to js{joystickNumber}
-                const targetPrefix = newPrefix || `js${page.joystickNumber || 1}`;
+                console.log(`[TemplateEditorV2] Updating ${page.buttons.length} buttons to remove prefixes...`);
 
-                if (page.buttons && page.buttons.length > 0)
+                page.buttons.forEach(button =>
                 {
-                    console.log(`[TemplateEditorV2] Prefix changed from '${oldPrefix}' to '${newPrefix}'. Updating ${page.buttons.length} buttons to use '${targetPrefix}'...`);
-
-                    page.buttons.forEach(button =>
+                    if (button.inputs)
                     {
-                        if (button.inputs)
+                        Object.keys(button.inputs).forEach(key =>
                         {
-                            Object.keys(button.inputs).forEach(key =>
+                            const val = button.inputs[key];
+                            if (typeof val === 'string')
                             {
-                                const val = button.inputs[key];
-                                if (typeof val === 'string')
+                                // Remove any device prefix (js1_, js2_, gp1_, etc.)
+                                const newVal = val.replace(/^(js|gp)\d+_/, '');
+                                if (newVal !== val)
                                 {
-                                    // Replace jsX_ or gpX_ with targetPrefix_
-                                    // Regex: start with js or gp, followed by digits, then underscore
-                                    const newVal = val.replace(/^(js|gp)\d+_/, `${targetPrefix}_`);
-                                    if (newVal !== val)
-                                    {
-                                        button.inputs[key] = newVal;
-                                    }
+                                    button.inputs[key] = newVal;
+                                    console.log(`[TemplateEditorV2]   Updated "${val}" -> "${newVal}"`);
                                 }
-                            });
-                        }
-                    });
-                }
+                            }
+                        });
+                    }
+                });
             }
 
             // Refresh the canvas if this is the currently displayed page
@@ -583,9 +511,7 @@ function savePageFromModal()
         state.template.pages.push({
             id: generatePageId(),
             name,
-            joystick_prefix: joystickPrefix,
-            device_uuid: deviceUuid,
-            device_name: deviceName,
+            device_prefix: devicePrefix, // Use snake_case to match JSON format
             axis_mapping: axisMapping,
             image_path: imagePath,
             image_data_url: imageDataUrl,
@@ -649,14 +575,6 @@ function openCustomAxisModal()
     // Store the original mapping so we can detect changes
     state.originalCustomMapping = cloneDeep(state.modalCustomMapping);
 
-    // Auto-populate mapping from HID descriptor if available and mapping is empty
-    if (Object.keys(state.modalCustomMapping).length === 0 && Object.keys(state.detectedAxisNames).length > 0)
-    {
-        // Create mapping based on HID descriptor axis names
-        // The axis IDs from the descriptor directly correspond to the axis indices in the report
-        state.modalCustomMapping = autoMapFromHidDescriptor();
-    }
-
     renderCustomAxisTable();
     dom.customAxisModal.style.display = 'flex';
 }
@@ -668,60 +586,6 @@ function closeCustomAxisModal()
     dom.customAxisModal.style.display = 'none';
 }
 
-// Auto-map axes based on HID descriptor names
-function autoMapFromHidDescriptor()
-{
-    const mapping = {};
-
-    // The detectedAxisNames keys are the actual axis IDs from the HID report
-    // These correspond directly to the indices used in axis_values
-    // We need to map these to 0-based raw indices for our UI
-    for (const [axisId, axisName] of Object.entries(state.detectedAxisNames))
-    {
-        // axisId from HID descriptor corresponds to the axis index in the report
-        // We need to find which "raw axis" slot (0-7) this should go into
-        // The axis IDs in the report ARE the raw indices (just 1-based vs 0-based)
-
-        const rawIndex = parseInt(axisId) - 1; // Convert 1-based to 0-based
-
-        // Map HID axis name to logical Star Citizen axis name
-        const logicalAxis = mapHidNameToLogical(axisName);
-
-        if (logicalAxis && rawIndex >= 0 && rawIndex < 8)
-        {
-            mapping[rawIndex] = logicalAxis;
-            console.log(`[Auto-map] Axis ${axisId} (${axisName}) -> Raw ${rawIndex} -> ${logicalAxis}`);
-        }
-    }
-
-    console.log('[Auto-map] Final mapping:', mapping);
-    return mapping;
-}
-
-// Map HID axis names to Star Citizen logical axis names
-function mapHidNameToLogical(hidName)
-{
-    // HID names from hut crate (Debug format) to our logical names
-    const nameMap = {
-        'X': 'x',
-        'Y': 'y',
-        'Z': 'z',
-        'Rx': 'rotx',
-        'Ry': 'roty',
-        'Rz': 'rotz',
-        'Slider': 'slider',
-        'Dial': 'slider2',
-        'Wheel': 'slider2',
-        'HatSwitch': 'hat',
-        // Handle variations
-        'RotationX': 'rotx',
-        'RotationY': 'roty',
-        'RotationZ': 'rotz'
-    };
-
-    return nameMap[hidName] || null;
-}
-
 function renderCustomAxisTable()
 {
     const mapping = state.modalCustomMapping || {};
@@ -730,17 +594,7 @@ function renderCustomAxisTable()
     {
         const isAssigned = mapping[rawIndex] && mapping[rawIndex] !== '';
 
-        // Get HID axis name if available
-        // The detectedAxisNames keys are 1-based axis indices from the descriptor
-        // We need to find which HID axis corresponds to this raw index
-        const hidAxisIndex = rawIndex + 1; // Convert 0-based raw to 1-based HID
-        const hidAxisName = state.detectedAxisNames[hidAxisIndex];
-
-        const axisLabel = hidAxisName
-            ? `Raw Axis ${rawIndex} <span style="color: #4CAF50; font-weight: 600;">[HID: ${hidAxisName}]</span>`
-            : `Raw Axis ${rawIndex}`;
-
-        console.log(`[Render] Raw ${rawIndex} -> HID Index ${hidAxisIndex} -> Name: ${hidAxisName} -> Mapped to: ${mapping[rawIndex]}`);
+        const axisLabel = `Raw Axis ${rawIndex}`;
 
         const options = LOGICAL_AXIS_OPTIONS.map(axis =>
             `<option value="${axis}" ${mapping[rawIndex] === axis ? 'selected' : ''}>${axis}</option>`
@@ -792,21 +646,8 @@ function saveCustomAxisMapping()
 
 async function resetCustomAxisMapping()
 {
-    // Clear current mapping first
+    // Clear current mapping
     state.modalCustomMapping = {};
-
-    // If we have a device selected, try to auto-map from HID descriptor
-    if (state.detectedDeviceName)
-    {
-        // Reload axis names to be sure
-        await loadAxisNamesForDevice(state.detectedDeviceName);
-
-        // Generate mapping from detected axis names
-        if (Object.keys(state.detectedAxisNames).length > 0)
-        {
-            state.modalCustomMapping = autoMapFromHidDescriptor();
-        }
-    }
 
     renderCustomAxisTable();
     updateAxisSummary();
@@ -964,185 +805,9 @@ function resizeImage(img, maxWidth = 1024, callback)
 }
 
 // Device detection functionality
-// Device detection - detects which device the user presses a button on
-async function detectDevice()
-{
-    const invoke = getInvoke();
-    if (!invoke)
-    {
-        dom.deviceDetectionStatus.textContent = 'Tauri API not available';
-        return;
-    }
-
-    if (state.isDetectingDevice)
-    {
-        stopDeviceDetection();
-        return;
-    }
-
-    state.isDetectingDevice = true;
-    state.deviceDetectionSessionId = `device-detect-${Date.now()}`;
-    const sessionId = state.deviceDetectionSessionId;
-
-    dom.detectDeviceBtn.textContent = '⏹️ Stop Detection';
-    dom.detectDeviceBtn.classList.add('btn-warning');
-    dom.detectDeviceBtn.classList.remove('btn-primary');
-    dom.deviceDetectionStatus.textContent = '🎮 Listening... Press any button on your device!';
-    dom.deviceDetectionStatus.className = 'info-text detecting';
-    dom.detectedDeviceInfo.classList.remove('detected');
-
-    try
-    {
-        // Refresh devices to get latest list
-        await refreshDevices();
-
-        const result = await invoke('wait_for_input_binding', {
-            sessionId: sessionId,
-            timeoutSecs: 20
-        });
-
-        if (!state.isDetectingDevice || state.deviceDetectionSessionId !== sessionId)
-        {
-            return;
-        }
-
-        if (result && result.device_uuid)
-        {
-            const device = state.devices.find(d => d.uuid === result.device_uuid);
-            if (device)
-            {
-                state.detectedDeviceUuid = device.uuid;
-                state.detectedDeviceName = device.name;
-                dom.detectedDeviceName.textContent = device.name;
-                dom.detectedDeviceUuid.textContent = `UUID: ${device.uuid}`;
-                dom.detectedDeviceUuid.style.display = 'block';
-                dom.detectedDeviceInfo.classList.add('detected');
-                dom.deviceDetectionStatus.textContent = `✓ Device detected: ${device.name}`;
-                dom.deviceDetectionStatus.className = 'info-text';
-
-                // Sync dropdown selection
-                if (dom.pageDeviceSelect)
-                {
-                    dom.pageDeviceSelect.value = device.uuid;
-                }
-
-                // Try to load axis names from HID descriptor
-                await loadAxisNamesForDevice(device.name);
-            }
-            else
-            {
-                // Device detected but not in cached list - add it with the UUID we got
-                state.detectedDeviceUuid = result.device_uuid;
-                state.detectedDeviceName = result.device_name || 'Unknown Device';
-                dom.detectedDeviceName.textContent = state.detectedDeviceName;
-                dom.detectedDeviceUuid.textContent = `UUID: ${result.device_uuid}`;
-                dom.detectedDeviceUuid.style.display = 'block';
-                dom.detectedDeviceInfo.classList.add('detected');
-                dom.deviceDetectionStatus.textContent = `✓ Device detected: ${state.detectedDeviceName}`;
-                dom.deviceDetectionStatus.className = 'info-text';
-
-                // Refresh device list in background to update cache and sync dropdown
-                refreshDevices().then(() =>
-                {
-                    if (dom.pageDeviceSelect)
-                    {
-                        dom.pageDeviceSelect.value = result.device_uuid;
-                    }
-                });
-            }
-        }
-        else
-        {
-            dom.deviceDetectionStatus.textContent = '⚠️ No device detected';
-        }
-    }
-    catch (error)
-    {
-        if (!state.isDetectingDevice) return;
-        console.error('Device detection error:', error);
-        dom.deviceDetectionStatus.textContent = error.includes('timeout') ?
-            '⏱️ Timeout - no input detected. Try again.' :
-            `Error: ${error}`;
-        dom.deviceDetectionStatus.className = 'info-text';
-    }
-    finally
-    {
-        state.isDetectingDevice = false;
-        state.deviceDetectionSessionId = null;
-        dom.detectDeviceBtn.textContent = '🎯 Press Button on Device';
-        dom.detectDeviceBtn.classList.remove('btn-warning');
-        dom.detectDeviceBtn.classList.add('btn-primary');
-    }
-}
-
-function stopDeviceDetection()
-{
-    state.isDetectingDevice = false;
-    state.deviceDetectionSessionId = null;
-    if (dom.detectDeviceBtn)
-    {
-        dom.detectDeviceBtn.textContent = '🎯 Press Button on Device';
-        dom.detectDeviceBtn.classList.remove('btn-warning');
-        dom.detectDeviceBtn.classList.add('btn-primary');
-    }
-}
-
-// Load axis names from HID descriptor for a device
-async function loadAxisNamesForDevice(deviceName)
-{
-    const invoke = getInvoke();
-    if (!invoke)
-    {
-        console.warn('[Axis Names] Tauri API not available');
-        return;
-    }
-
-    try
-    {
-        console.log(`[Axis Names] Loading axis names for device: ${deviceName}`);
-        const axisNames = await invoke('get_axis_names_for_device', { deviceName });
-
-        state.detectedAxisNames = axisNames || {};
-        const count = Object.keys(state.detectedAxisNames).length;
-
-        console.log(`[Axis Names] Raw response:`, axisNames);
-        console.log(`[Axis Names] Axis IDs found:`, Object.keys(state.detectedAxisNames));
-        console.log(`[Axis Names] Axis names found:`, Object.values(state.detectedAxisNames));
-
-        if (count > 0)
-        {
-            console.log(`[Axis Names] Successfully loaded ${count} axis names:`, state.detectedAxisNames);
-
-            // Update the custom axis table if it's currently open
-            if (dom.customAxisModal && dom.customAxisModal.style.display === 'flex')
-            {
-                renderCustomAxisTable();
-            }
-        }
-        else
-        {
-            console.log('[Axis Names] No axis names detected from HID descriptor');
-        }
-    }
-    catch (error)
-    {
-        console.warn('[Axis Names] Could not load axis names from HID descriptor:', error);
-        state.detectedAxisNames = {};
-    }
-}
-
 // Axis detection functionality
 async function startAxisDetection()
 {
-    const deviceUuid = state.detectedDeviceUuid;
-    const deviceName = state.detectedDeviceName;
-
-    if (!deviceUuid)
-    {
-        dom.axisDetectionStatus.textContent = 'Please detect a device first using the button above.';
-        return;
-    }
-
     const invoke = getInvoke();
     if (!invoke)
     {
@@ -1487,42 +1152,6 @@ function highlightAxis(rawIndex, value, bitDepth = 16, maxValue = 65535)
     dom.axisDetectionStatus.textContent = `🎯 Detected movement on Raw Axis ${rawIndex} (${bitDepth}-bit)! Assign it using the dropdown.`;
 }
 
-function onDeviceSelectChange()
-{
-    const selectedUuid = dom.pageDeviceSelect?.value;
-
-    if (selectedUuid && selectedUuid !== '' && selectedUuid !== '__none')
-    {
-        // User manually selected a device from dropdown - sync with detection display
-        const device = state.devices.find(d => d.uuid === selectedUuid);
-        if (device)
-        {
-            state.detectedDeviceUuid = device.uuid;
-            state.detectedDeviceName = device.name;
-            dom.detectedDeviceName.textContent = device.name;
-            dom.detectedDeviceUuid.textContent = `UUID: ${device.uuid}`;
-            dom.detectedDeviceUuid.style.display = 'block';
-            dom.detectedDeviceInfo.classList.add('detected');
-            dom.deviceDetectionStatus.textContent = `✓ Device selected: ${device.name}`;
-            dom.deviceDetectionStatus.className = 'info-text';
-
-            // Load axis names for this device
-            loadAxisNamesForDevice(device.name);
-        }
-    }
-    else
-    {
-        // User cleared selection
-        state.detectedDeviceUuid = null;
-        state.detectedDeviceName = null;
-        state.detectedAxisNames = {};
-        dom.detectedDeviceName.textContent = 'No device detected';
-        dom.detectedDeviceUuid.style.display = 'none';
-        dom.detectedDeviceInfo.classList.remove('detected');
-        dom.deviceDetectionStatus.textContent = 'Press any button on your joystick or gamepad to identify it.';
-        dom.deviceDetectionStatus.className = 'info-text';
-    }
-}
 
 export function getTemplateV2State()
 {
@@ -1550,15 +1179,19 @@ export async function initializeTemplatePagesUI(options = {})
     dom.pageModal = document.getElementById('template-page-modal');
     dom.pageModalTitle = document.getElementById('template-page-modal-title');
     dom.pageNameInput = document.getElementById('template-page-name');
-    dom.pagePrefixSelect = document.getElementById('template-page-prefix');
-    dom.pageDeviceSelect = document.getElementById('page-device-select');
-    dom.detectDeviceBtn = document.getElementById('detect-device-btn');
-    dom.detectedDeviceInfo = document.getElementById('detected-device-info');
-    dom.detectedDeviceName = document.getElementById('detected-device-name');
-    dom.detectedDeviceUuid = document.getElementById('detected-device-uuid');
-    dom.deviceDetectionStatus = document.getElementById('device-detection-status');
-    dom.axisSummary = document.getElementById('template-page-axis-summary');
-    dom.openCustomAxisBtn = document.getElementById('open-custom-axis-modal');
+    dom.pagePrefixSelect = document.getElementById('template-page-prefix-select');
+
+    // Initialize CustomDropdown for device prefix
+    if (dom.pagePrefixSelect)
+    {
+        dom.devicePrefixDropdown = new CustomDropdown(dom.pagePrefixSelect, {
+            onChange: (item) =>
+            {
+                console.log('[DevicePrefix] Changed to:', item.value);
+            }
+        });
+    }
+
     dom.pageSaveBtn = document.getElementById('template-page-save-btn');
     dom.pageCancelBtn = document.getElementById('template-page-cancel-btn');
     dom.pageDeleteBtn = document.getElementById('template-page-delete-btn');
@@ -1582,8 +1215,6 @@ export async function initializeTemplatePagesUI(options = {})
 
     dom.pagesList.addEventListener('click', handlePagesListClick);
     dom.addPageBtn?.addEventListener('click', () => openPageModal());
-    dom.pageDeviceSelect?.addEventListener('change', onDeviceSelectChange);
-    dom.detectDeviceBtn?.addEventListener('click', detectDevice);
     dom.pageCancelBtn?.addEventListener('click', closePageModal);
     dom.pageSaveBtn?.addEventListener('click', savePageFromModal);
     dom.pageDeleteBtn?.addEventListener('click', () =>
@@ -1594,33 +1225,10 @@ export async function initializeTemplatePagesUI(options = {})
             closePageModal();
         }
     });
-    dom.openCustomAxisBtn?.addEventListener('click', () =>
-    {
-        openCustomAxisModal();
-    });
 
-    dom.customAxisCancelBtn?.addEventListener('click', closeCustomAxisModal);
-    dom.customAxisSaveBtn?.addEventListener('click', saveCustomAxisMapping);
-    dom.customAxisResetBtn?.addEventListener('click', resetCustomAxisMapping);
-    dom.startAxisDetectionBtn?.addEventListener('click', startAxisDetection);
-    dom.stopAxisDetectionBtn?.addEventListener('click', stopAxisDetection);
     dom.pageLoadImageBtn?.addEventListener('click', handlePageImageLoad);
     dom.pageClearImageBtn?.addEventListener('click', clearPageImage);
 
-    // Add refresh devices button listener
-    const refreshDevicesBtn = document.getElementById('refresh-devices-btn');
-    if (refreshDevicesBtn)
-    {
-        refreshDevicesBtn.addEventListener('click', async (e) =>
-        {
-            e.preventDefault();
-            e.stopPropagation();
-            await handleRefreshDevices();
-        });
-    }
-
-    await refreshDevices();
-    // Axis profiles are now determined dynamically from HID descriptors per-device
     state.initialized = true;
 
     window.templateV2State = state;
@@ -1639,6 +1247,12 @@ export function refreshTemplatePagesUI(templateOverride = null)
     if (!templateRef || typeof templateRef !== 'object')
     {
         templateRef = cloneDeep(DEFAULT_TEMPLATE_V2);
+    }
+
+    // Migrate template if needed (v1.0 -> v1.1)
+    if (templateRef.version === '1.0' || !templateRef.version)
+    {
+        migrateTemplateToV11(templateRef);
     }
 
     if (!Array.isArray(templateRef.pages))

@@ -252,7 +252,7 @@ async function manualUpdateCheck()
             if (statusEl)
             {
                 statusEl.textContent = '❌ Failed to check for updates. Please try again later.';
-                statusEl.style.color = '#d9534f';
+                statusEl.style.color = '#ef4444';
             }
             console.log('Could not fetch latest release info');
             return;
@@ -270,7 +270,7 @@ async function manualUpdateCheck()
             if (statusEl)
             {
                 statusEl.textContent = `✨ Update available: v${latestRelease.version}`;
-                statusEl.style.color = '#9bdb9a';
+                statusEl.style.color = '#10b981';
             }
 
             // Store update info
@@ -283,7 +283,7 @@ async function manualUpdateCheck()
             if (statusEl)
             {
                 statusEl.textContent = '✓ You are running the latest version!';
-                statusEl.style.color = '#9bdb9a';
+                statusEl.style.color = '#10b981';
             }
         }
 
@@ -295,7 +295,7 @@ async function manualUpdateCheck()
         if (statusEl)
         {
             statusEl.textContent = '❌ Error checking for updates';
-            statusEl.style.color = '#d9534f';
+            statusEl.style.color = '#ef4444';
         }
     }
 }

@@ -2,6 +2,7 @@
     --tooltip-bg: #121212;
     --tooltip-text: #e0e0e0;
     --tooltip-border: #6b6b6b;
+    --arrow-position: 50%;
 }
 
 .custom-tooltip {
@@ -42,7 +43,7 @@
 .custom-tooltip.tooltip-top::before {
     display: block;
     top: 100%;
-    left: 50%;
+    left: var(--arrow-position);
 }
 
 /* The border arrow (larger) */
@@ -64,7 +65,7 @@
 .custom-tooltip.tooltip-bottom::before {
     display: block;
     bottom: 100%;
-    left: 50%;
+    left: var(--arrow-position);
 }
 
 /* The border arrow */

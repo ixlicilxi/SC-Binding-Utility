@@ -5,6 +5,38 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::ffi::CString;
 
+pub struct OpenedHidDevice {
+    device: hidapi::HidDevice,
+}
+
+impl OpenedHidDevice {
+    pub fn open(device_path: &str) -> Result<Self, String> {
+        let api = HidApi::new().map_err(|e| format!("Failed to initialize HID API: {}", e))?;
+        let c_path =
+            CString::new(device_path).map_err(|e| format!("Invalid device path: {}", e))?;
+        let device = api
+            .open_path(&c_path)
+            .map_err(|e| format!("Failed to open HID device: {}", e))?;
+        Ok(Self { device })
+    }
+
+    pub fn read(&self, timeout_ms: i32) -> Result<Vec<u8>, String> {
+        let mut buf = [0u8; 256];
+        let len = self
+            .device
+            .read_timeout(&mut buf, timeout_ms)
+            .map_err(|e| format!("Failed to read from HID device: {}", e))?;
+
+        if len > 0 {
+            // Only log if we actually read something to avoid spamming
+            // eprintln!("[HID] Read {} bytes from device", len);
+            Ok(buf[..len].to_vec())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct HidDeviceListItem {
     pub vendor_id: u16,
@@ -93,8 +125,8 @@ pub fn read_hid_report(device_path: &str, timeout_ms: i32) -> Result<Vec<u8>, St
         // Print first 16 bytes with positions for easier analysis
         if len >= 16 {
             eprint!("[HID] Bytes 0-15:  ");
-            for i in 0..16 {
-                eprint!("{:02X} ", buf[i]);
+            for byte in buf.iter().take(16) {
+                eprint!("{:02X} ", byte);
             }
             eprintln!();
             eprint!("[HID] Positions:   ");
@@ -114,114 +146,15 @@ pub fn parse_hid_axes_from_descriptor_bytes(
     report: &[u8],
     descriptor: &[u8],
 ) -> Result<HidAxisReport, String> {
-    // Parse the descriptor
-    let rdesc = ReportDescriptor::try_from(descriptor)
-        .map_err(|e| format!("Failed to parse report descriptor: {:?}", e))?;
-
-    // Find the matching input report
-    let input_report = rdesc
-        .find_input_report(report)
-        .ok_or("No matching input report found")?;
-
-    let mut axis_values = HashMap::new();
-    let mut axis_bit_depths = HashMap::new();
-    let mut axis_names = HashMap::new();
-    let mut axis_ranges: HashMap<u32, (i32, i32)> = HashMap::new();
-    let mut max_bits = 8;
-
-    // Extract values from each field
-    for field in input_report.fields() {
-        match field {
-            Field::Variable(var) => {
-                // Filter out buttons (Usage Page 0x09)
-                if u16::from(var.usage.usage_page) == 0x09 {
-                    continue;
-                }
-
-                // Extract the value based on bit size
-                let bits = var.bits.end - var.bits.start;
-                max_bits = max_bits.max(bits);
-
-                // Construct usage value
-                let usage_val: u32 = ((u16::from(var.usage.usage_page) as u32) << 16)
-                    | (u16::from(var.usage.usage_id) as u32);
-
-                // Use the usage ID as the axis index for consistency
-                // This ensures the same axis always has the same ID regardless of descriptor order
-                let axis_index = u16::from(var.usage.usage_id) as u32;
-
-                // Extract the value
-                match var.extract(report) {
-                    Ok(field_value) => {
-                        // FieldValue implements Into<i32>
-                        let value: i32 = field_value.into();
-
-                        // Don't clamp - keep the raw value as extracted
-                        // The HID descriptor knows the correct range
-                        let value_u16 = if value < 0 {
-                            0
-                        } else if value > u16::MAX as i32 {
-                            u16::MAX
-                        } else {
-                            value as u16
-                        };
-
-                        // Get axis name
-                        let axis_name = Usage::try_from(usage_val)
-                            .ok()
-                            .map(|u| u.name().to_string())
-                            .unwrap_or_else(|| {
-                                format!(
-                                    "Usage {:04x}:{:04x}",
-                                    u16::from(var.usage.usage_page),
-                                    u16::from(var.usage.usage_id)
-                                )
-                            });
-
-                        let logical_min = i32::from(var.logical_minimum);
-                        let logical_max = i32::from(var.logical_maximum);
-
-                        // Calculate effective bit depth from the actual range
-                        // For example: range 0-4095 = 12 bits, 0-2047 = 11 bits, 0-1023 = 10 bits
-                        let range = (logical_max - logical_min) as u32;
-                        let effective_bits = if range > 0 {
-                            32 - range.leading_zeros() // Number of bits needed to represent the range
-                        } else {
-                            bits as u32 // Fallback to report_size if range is invalid
-                        };
-
-                        axis_values.insert(axis_index, value_u16);
-                        axis_bit_depths.insert(axis_index, effective_bits as u8);
-                        axis_names.insert(axis_index, axis_name.clone());
-                        axis_ranges.insert(axis_index, (logical_min, logical_max));
-                        eprintln!(
-                            "[HID] Axis {}: {} = {} ({} bits, effective {} bits, usage: 0x{:08X}, logical range: {} to {})",
-                            axis_index, axis_name, value, bits, effective_bits, usage_val, logical_min, logical_max
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[HID] Failed to extract axis value: {:?}", e);
-                    }
-                }
-            }
-            Field::Array(_arr) => {
-                // Array fields are typically buttons, skip for axis extraction
-            }
-            Field::Constant(_) => {
-                // Padding, skip
-            }
-        }
-    }
-
-    let is_16bit = max_bits > 8;
+    let full_report = parse_hid_full_report(report, descriptor)?;
 
     Ok(HidAxisReport {
-        axis_values,
-        axis_bit_depths,
-        axis_names,
-        axis_ranges,
-        timestamp_ms: current_time_ms(),
-        is_16bit,
+        axis_values: full_report.axis_values,
+        axis_bit_depths: full_report.axis_bit_depths,
+        axis_names: full_report.axis_names,
+        axis_ranges: full_report.axis_ranges,
+        timestamp_ms: full_report.timestamp_ms,
+        is_16bit: full_report.is_16bit,
     })
 }
 

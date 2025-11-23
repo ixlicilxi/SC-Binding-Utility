@@ -29,6 +29,11 @@ const FILES_TO_UPDATE = [
         path: 'src/main.js',
         regex: /const CURRENT_VERSION = '(\d+\.\d+\.\d+)';/g,
         replacement: "const CURRENT_VERSION = 'NEW_VERSION';"
+    },
+    {
+        path: 'src/index.html',
+        regex: /<h2>🎉 What's New in v(\d+\.\d+\.\d+)<\/h2>/,
+        replacement: '<h2>🎉 What\'s New in vNEW_VERSION</h2>'
     }
 ];
 

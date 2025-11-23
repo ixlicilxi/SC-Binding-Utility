@@ -7,9 +7,11 @@
   <link rel="stylesheet" href="joystick-viewer.css" />
   <link rel="stylesheet" href="template-editor.css" />
   <link rel="stylesheet" href="input-debugger.css" />
+  <link rel="stylesheet" href="device-manager.css" />
   <link rel="stylesheet" href="character-manager.css" />
   <link rel="stylesheet" href="tooltip.css" />
   <link rel="stylesheet" href="custom-dropdown.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Star Citizen Bindnig Utility</title>
   <script>
@@ -26,13 +28,27 @@
         document.documentElement.style.fontSize = FONT_SIZE_DEFAULT + 'px';
       }
     })();
+
+    // Restore theme immediately before page renders to avoid theme flash
+    (function ()
+    {
+      const THEME_STORAGE_KEY = 'appTheme';
+      const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+      if (savedTheme === 'vscode')
+      {
+        document.documentElement.classList.add('theme-red');
+      }
+    })();
   </script>
+  <script type="module" src="/theme-switcher.js" defer></script>
   <script type="module" src="/button-renderer.js" defer></script>
   <script type="module" src="/main.js" defer></script>
   <script type="module" src="/joystick-viewer.js" defer></script>
   <script type="module" src="/template-editor.js" defer></script>
   <script type="module" src="/input-debugger.js" defer></script>
+  <script type="module" src="/device-manager.js" defer></script>
   <script type="module" src="/character-manager.js" defer></script>
+  <script type="module" src="/starfield.js" defer></script>
 </head>
 
 <body>
@@ -42,35 +58,23 @@
       <!-- Header Row 1 -->
       <div class="header-row-1">
         <div class="header-logo">
-          <h1>Star Citizen Binding Utility <span id="app-version">v0.8.2</span></h1>
+          <h1>Star-Nexus<span id="app-version">v0.9.0</span></h1>
           <div id="update-info" class="header-update-info"></div>
         </div>
-        <div class="header-actions">
-          <button id="sc-directory-btn" class="btn btn-primary" title="Configure Star Citizen installation directory">⚙️
-            Auto Save Settings</button>
-          <button id="load-btn" class="btn btn-primary">Load</button>
-          <button id="save-as-btn" class="btn btn-primary" disabled>Save As...</button>
-          <button id="save-btn" class="btn btn-success" disabled>💾 Save Keybindings</button>
-          <button id="copy-command-btn" class="btn btn-primary" title="Copy rebind command to clipboard"
-            style="display: none;">📋</button>
-        </div>
-        <div class="header-file-info">
-          <div id="loaded-file-indicator" class="loaded-file-indicator" style="display: none;">
-            <span class="file-icon">📄</span>
-            <span id="loaded-file-name">layout_NewBindings_exported.xml</span>
-          </div>
-        </div>
+        <button id="theme-switcher" class="theme-switcher" title="Switch theme">
+          <span class="theme-switcher-icon">🌙</span>
+          <span class="theme-switcher-text">Theme</span>
+        </button>
       </div>
 
       <!-- Header Row 2 -->
       <div class="header-row-2">
         <div class="header-tabs">
           <button id="tab-welcome" class="tab-btn active" data-tab="welcome">👋 Welcome</button>
-          <button id="tab-main" class="tab-btn" data-tab="main">Keybindings</button>
-          <button id="tab-visual" class="tab-btn" data-tab="visual">Visual View</button>
+          <button id="tab-bindings" class="tab-btn" data-tab="bindings">Keybindings</button>
           <button id="tab-template" class="tab-btn" data-tab="template">Template Editor</button>
-          <button id="tab-debugger" class="tab-btn" data-tab="debugger">Input Debugger</button>
-          <button id="tab-character" class="tab-btn" data-tab="character">Characters</button>
+          <button id="tab-debugger" class="tab-btn" data-tab="debugger">Device Manager</button>
+          <button id="tab-character" class="tab-btn" data-tab="character">Character Manager</button>
           <button id="tab-help" class="tab-btn" data-tab="help">❓ Help</button>
           <button id="tab-settings" class="tab-btn tab-settings-btn" data-tab="settings"
             title="Settings & Debug">⚙️</button>
@@ -166,183 +170,229 @@
         </div>
       </div>
 
-      <!-- TAB 1: Main Keybindings Page -->
-      <div id="tab-content-main" class="tab-content">
-        <div class="main-content">
-          <!-- Sidebar - Categories and Filters -->
-          <aside class="sidebar">
-            <div class="filter-section">
-              <h3>Actions</h3>
-              <button id="new-keybinding-btn" class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem;">📝
-                New Keybinding</button>
-              <button id="configure-joystick-mapping-btn" class="btn btn-secondary"
-                style="width: 100%; margin-bottom: 0.75rem;">⚙️ Set Joystick
-                Remapping</button>
-              <button id="clear-sc-binds-btn" class="btn btn-danger" style="width: 100%;">🗑️ Clear SC Binds</button>
+      <!-- TAB 1: Bindings Page (List + Visual Views) -->
+      <div id="tab-content-bindings" class="tab-content">
+        <!-- Bindings Sub-Navigation -->
+        <div class="bindings-sub-nav">
+          <div class="bindings-sub-nav-left">
+            <button id="bindings-view-list" class="bindings-view-btn active" data-view="list">
+              <span class="view-icon">📋</span>
+              <span>List View</span>
+            </button>
+            <button id="bindings-view-visual" class="bindings-view-btn" data-view="visual">
+              <span class="view-icon">🎮</span>
+              <span>Visual View</span>
+            </button>
+          </div>
+          <div class="bindings-sub-nav-right">
+            <div id="loaded-file-indicator-sub" class="loaded-file-indicator-sub">
+              <span class="file-icon">📄</span>
+              <span id="loaded-file-name-sub">layout_NewBindings_exported.xml</span>
             </div>
-
-            <div class=" filter-section">
-              <h3>Filters</h3>
-              <div class="category-list">
-                <button class="category-item  category-item-indented active" data-filter="all">All</button>
-                <button class="category-item  category-item-indented" data-filter="keyboard">Keyboard</button>
-                <button class="category-item  category-item-indented" data-filter="mouse">Mouse</button>
-                <button class="category-item  category-item-indented" data-filter="joystick">Joystick</button>
-                <button class="category-item  category-item-indented" data-filter="gamepad">Gamepad</button>
-                <div class="checkbox-container">
-                  <input type="checkbox" id="customized-only-checkbox" />
-                  <label for="customized-only-checkbox">Customized Only</label>
-                </div>
-                <div class="checkbox-container">
-                  <input type="checkbox" id="show-defaults-checkbox" checked />
-                  <label for="show-defaults-checkbox">Show Default Bindings</label>
-                </div>
-              </div>
-            </div>
-
-            <div class="category-section">
-              <h3>Categories</h3>
-              <div id="category-list" class="category-list">
-                <!-- Categories will be populated here -->
-              </div>
-            </div>
-
-            <div class="device-info">
-              <h3>Devices</h3>
-              <div id="device-list">
-                <!-- Device info will be populated here -->
-              </div>
-            </div>
-          </aside>
-
-          <!-- Main Panel - Keybindings Display -->
-          <main class="bindings-panel">
-            <div id="welcome-screen" class="welcome-screen">
-              <div class="welcome-content">
-                <h2>Welcome to Star Citizen Binding Utility</h2>
-                <p>Load a Star Citizen keybinding file to view and manage your controls</p>
-                <button id="welcome-load-btn" class="btn btn-large btn-primary">Load Keybindings File</button>
-              </div>
-            </div>
-
-            <div id="bindings-content" class="bindings-content" style="display: none;">
-              <div class="bindings-header">
-                <h2 id="profile-name">Profile Name</h2>
-                <div class="search-container">
-                  <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
-                  <button id="search-clear-btn" class="search-clear-btn" title="Clear search"
-                    style="display: none;">✕</button>
-                </div>
-              </div>
-
-              <div id="action-maps-container" class="action-maps-container">
-                <!-- Action maps and bindings will be populated here -->
-              </div>
-            </div>
-          </main>
+            <button id="sc-directory-btn" class="btn btn-secondary btn-sm"
+              title="Configure Star Citizen installation directory"><span id="sc-directory-icon">⚙️</span>
+              Auto Save Settings</button>
+            <button id="load-btn" class="btn btn-secondary btn-sm">Load</button>
+            <button id="save-as-btn" class="btn btn-secondary btn-sm" disabled>Save As...</button>
+            <button id="save-btn" class="btn btn-success btn-sm" disabled>💾 Save</button>
+            <button id="copy-command-btn" class="btn btn-secondary btn-sm" title="Copy rebind command to clipboard"
+              style="display: none;">📋</button>
+          </div>
         </div>
-      </div>
 
-      <!-- TAB 2: Visual View Page -->
-      <div id="tab-content-visual" class="tab-content">
-        <div class="viewer-content">
-          <!-- Joystick Display -->
-          <div class="joystick-display">
-            <!-- Quick Tips -->
-            <div class="quick-tips" style="top:3rem;right:3rem;">Middle or Right click to pan view<br>Scroll wheel to
-              zoom<br>Press <kbd>Tab</kbd> to switch pages<br>Click on button boxes to show all actions<br>Grey actions
-              are default SC bind actions</div>
+        <!-- List View Container -->
+        <div id="bindings-list-view" class="bindings-view-container active">
 
-            <div id="welcome-screen-visual" class="welcome-screen">
-              <div class="welcome-content">
-                <h2>Select a joystick template to view your bindings</h2>
-                <p>Make sure you have keybindings loaded first</p>
-                <button id="welcome-select-btn" class="btn btn-large btn-primary">Select Template</button>
-              </div>
-            </div>
-
-            <div id="viewer-canvas-container" class="canvas-container" style="display: none;">
-              <canvas id="viewer-canvas"></canvas>
-            </div>
-
-            <!-- Floating Control Toolbar -->
-            <div id="viewer-controls" class="viewer-controls" style="display: none;">
-              <!-- Stick Selector -->
-              <div class="control-group stick-selector" id="viewer-stick-selector" style="display: none;">
-                <button id="viewer-left-stick-btn" class="control-btn" title="View Left Stick">
-                  <span class="control-icon">🕹️</span>
-                  <span>Left</span>
-                </button>
-                <button id="viewer-right-stick-btn" class="control-btn active" title="View Right Stick">
-                  <span class="control-icon">🕹️</span>
-                  <span>Right</span>
-                </button>
+          <div class="main-content">
+            <!-- Sidebar - Categories and Filters -->
+            <aside class="sidebar">
+              <div class="filter-section">
+                <h3>Actions</h3>
+                <button id="new-keybinding-btn" class="btn btn-secondary" style="width: 100%;">📝
+                  New Keybinding Set</button>
+                <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Clear SC
+                  Binds</button>
+                <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Manage
+                  Devices</button>
               </div>
 
-              <div class="control-divider"></div>
-
-              <!-- Filter Controls -->
-              <div class="control-group">
-                <button id="hide-defaults-toggle" class="control-btn" title="Hide Default Bindings">
-                  <span class="control-icon">👁️</span>
-                  <span>Show All</span>
-                </button>
+              <div class=" filter-section">
+                <h3>Filters</h3>
+                <div class="category-list">
+                  <button class="category-item  category-item-indented active" data-filter="all">All</button>
+                  <button class="category-item  category-item-indented" data-filter="keyboard">Keyboard</button>
+                  <button class="category-item  category-item-indented" data-filter="mouse">Mouse</button>
+                  <button class="category-item  category-item-indented" data-filter="joystick">Joystick</button>
+                  <button class="category-item  category-item-indented" data-filter="gamepad">Gamepad</button>
+                  <div class="checkbox-container" id="customized-only-wrapper">
+                    <input type="checkbox" id="customized-only-checkbox" />
+                    <label for="customized-only-checkbox">Customized Only</label>
+                  </div>
+                  <div class="checkbox-container" id="show-unbound-wrapper">
+                    <input type="checkbox" id="show-unbound-checkbox" checked />
+                    <label for="show-unbound-checkbox">Show Unbound Actions</label>
+                  </div>
+                </div>
               </div>
 
-              <div class="control-divider"></div>
-
-              <!-- Template & Export -->
-              <div class="control-group">
-                <button id="select-template-btn" class="control-btn" title="Select Template">
-                  <span class="control-icon">📋</span>
-                  <span>Open</span>
-                </button>
-                <button id="export-image-btn" class="control-btn" title="Export as Image">
-                  <span class="control-icon">💾</span>
-                  <span>Export</span>
-                </button>
+              <div class="category-section">
+                <h3>Categories</h3>
+                <div id="category-list" class="category-list">
+                  <!-- Categories will be populated here -->
+                </div>
               </div>
-            </div>
+            </aside>
 
-            <!-- Modifier Filter Toolbar -->
-            <div id="modifier-toolbar" class="modifier-toolbar" style="display: none;">
-              <span class="toolbar-label">Filter by:</span>
-              <div class="modifier-options">
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="all" checked />
-                  <span>All</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="lalt" />
-                  <span>L Alt</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="lctrl" />
-                  <span>L Ctrl</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="lshift" />
-                  <span>L Shift</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="rshift" />
-                  <span>R Shift</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="rctrl" />
-                  <span>R Ctrl</span>
-                </label>
-                <label class="modifier-radio">
-                  <input type="radio" name="modifier-filter" value="ralt" />
-                  <span>R Alt</span>
-                </label>
+            <!-- Main Panel - Keybindings Display -->
+            <main class="bindings-panel">
+              <div id="welcome-screen" class="welcome-screen-bindings">
+                <div class="welcome-content">
+                  <h2>Get Started with Your Keybindings</h2>
+                  <p style="margin-bottom: 1.5rem;">Choose one of the options below:</p>
+                  <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 500px;">
+                    <div
+                      style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                      <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">📂 Load Existing Keybindings</h3>
+                      <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Import a
+                        keybinding file from your Star Citizen installation to view and customize your controls.</p>
+                      <button id="welcome-load-btn" class="btn btn-primary" style="width: 100%;">Load File</button>
+                    </div>
+                    <div
+                      style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                      <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">✨ Create New Keybindings</h3>
+                      <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Start from
+                        scratch with a blank keybinding set. Customize your controls from the default Star Citizen
+                        bindings.</p>
+                      <button id="welcome-new-btn" class="btn btn-primary" style="width: 100%;">Create New
+                        Set</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="bindings-content" class="bindings-content" style="display: none;">
+                <div class="bindings-header">
+                  <h2 id="profile-name">Keybindings</h2>
+                  <div class="search-container">
+                    <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
+                    <button id="search-clear-btn" class="search-clear-btn" title="Clear search"
+                      style="display: none;">✕</button>
+                  </div>
+                </div>
+
+                <div id="action-maps-container" class="action-maps-container">
+                  <!-- Action maps and bindings will be populated here -->
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+        <!-- End List View Container -->
+
+        <!-- Visual View Container -->
+        <div id="bindings-visual-view" class="bindings-view-container">
+          <div class="viewer-content">
+            <!-- Joystick Display -->
+            <div class="joystick-display">
+              <!-- Quick Tips -->
+              <div class="quick-tips" style="top:3rem;right:3rem;">Middle or Right click to pan view<br>Scroll wheel to
+                zoom<br>Press <kbd>Tab</kbd> to switch pages<br>Click on button boxes to show all actions<br>Grey
+                actions
+                are default SC bind actions</div>
+
+              <div id="welcome-screen-visual" class="welcome-screen-visual">
+                <div class="welcome-content">
+                  <h2>Select a joystick template to view your bindings</h2>
+                  <p>Make sure you have keybindings loaded first</p>
+                  <button id="welcome-select-btn" class="btn btn-large btn-primary">Select Template</button>
+                </div>
+              </div>
+
+              <div id="viewer-canvas-container" class="canvas-container" style="display: none;">
+                <canvas id="viewer-canvas"></canvas>
+              </div>
+
+              <!-- Floating Control Toolbar -->
+              <div id="viewer-controls" class="viewer-controls" style="display: none;">
+                <!-- Stick Selector -->
+                <div class="control-group stick-selector" id="viewer-stick-selector" style="display: none;">
+                  <button id="viewer-left-stick-btn" class="control-btn" title="View Left Stick">
+                    <span class="control-icon">🕹️</span>
+                    <span>Left</span>
+                  </button>
+                  <button id="viewer-right-stick-btn" class="control-btn active" title="View Right Stick">
+                    <span class="control-icon">🕹️</span>
+                    <span>Right</span>
+                  </button>
+                </div>
+
+                <div class="control-divider"></div>
+
+                <!-- Filter Controls -->
+                <div class="control-group">
+                  <button id="hide-defaults-toggle" class="control-btn" title="Hide Default Bindings">
+                    <span class="control-icon">👁️</span>
+                    <span>Show All</span>
+                  </button>
+                </div>
+
+                <div class="control-divider"></div>
+
+                <!-- Template & Export -->
+                <div class="control-group">
+                  <button id="select-template-btn" class="control-btn" title="Select Template">
+                    <span class="control-icon">📋</span>
+                    <span>Open</span>
+                  </button>
+                  <button id="export-image-btn" class="control-btn" title="Export as Image">
+                    <span class="control-icon">💾</span>
+                    <span>Export</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Modifier Filter Toolbar -->
+              <div id="modifier-toolbar" class="modifier-toolbar" style="display: none;">
+                <span class="toolbar-label">Filter by:</span>
+                <div class="modifier-options">
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="all" checked />
+                    <span>All</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="lalt" />
+                    <span>L Alt</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="lctrl" />
+                    <span>L Ctrl</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="lshift" />
+                    <span>L Shift</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="rshift" />
+                    <span>R Shift</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="rctrl" />
+                    <span>R Ctrl</span>
+                  </label>
+                  <label class="modifier-radio">
+                    <input type="radio" name="modifier-filter" value="ralt" />
+                    <span>R Alt</span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
         </div>
+        <!-- End Visual View Container -->
       </div>
+      <!-- End Bindings Tab -->
 
-      <!-- TAB 3: Template Editor Page -->
+      <!-- TAB 2: Template Editor Page -->
       <div id="tab-content-template" class="tab-content">
         <div class="editor-content">
           <!-- Left Sidebar - Controls -->
@@ -353,19 +403,15 @@
                 Template Name:
                 <input type="text" id="template-name" placeholder="e.g., T16000M Left" />
               </label>
-              <label>
-                Joystick Model:
-                <input type="text" id="joystick-model" placeholder="e.g., Thrustmaster T16000M" />
-              </label>
             </div>
 
             <div class="section">
-              <h3>Template Pages</h3>
+              <h3>Template Devices</h3>
               <div id="template-pages-empty" class="empty-state-small">
-                No pages yet. Add a page for each physical stick, throttle, or pedal you want to document.
+                No devices yet. Add a device for each physical stick, throttle, or pedal.
               </div>
               <div id="template-pages-list" class="template-pages-list"></div>
-              <button id="add-template-page-btn" class="btn btn-secondary btn-block">+ Add Page</button>
+              <button id="add-template-page-btn" class="btn btn-secondary btn-block">+ Add Device</button>
             </div>
 
             <div class="section">
@@ -454,79 +500,118 @@
         </div>
       </div>
 
-      <!-- TAB 4: Input Debugger Page -->
+      <!-- TAB 3: Device Manager Page -->
       <div id="tab-content-debugger" class="tab-content">
-        <div class="tab-subheader">
-          <h2>Input Debugger</h2>
-          <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button id="switch-to-basic-debug" class="btn btn-secondary btn-sm active">Basic Debugger</button>
-            <button id="switch-to-hid-debug" class="btn btn-secondary btn-sm">🔬 HID Raw Data</button>
+        <div class="dm-container">
+          <!-- Unified Device Management Section -->
+          <div class="dm-section">
+            <div class="dm-section-header">
+              <h2 class="dm-section-title">
+                <span class="dm-section-title-icon">🎮</span>
+                Device Management
+              </h2>
+              <div class="dm-section-actions">
+                <button id="dm-refresh-devices-btn" class="btn btn-primary">🔄 Refresh Devices</button>
+              </div>
+            </div>
+            <p class="dm-section-description">
+              View and manage your connected devices. Assign custom prefixes (js1-js5, gp1-gp5) to override the
+              auto-detected IDs. Prefix changes are saved automatically and persist between sessions, and will be used
+              when assigning keybindings in the main Keybindings tab.
+            </p>
+            <div class="dm-info-box">
+              <div class="dm-info-box-title">💡 Understanding Device Prefixes</div>
+              <p>Star Citizen identifies your devices as <strong>js1, js2, js3</strong> (joysticks) or <strong>gp1,
+                  gp2</strong> (gamepads). The app auto-detects these prefixes, but sometimes they can change:</p>
+              <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                <li><strong>After restarting:</strong> Windows may detect devices in a different order</li>
+                <li><strong>With multiple devices:</strong> Device order can vary unpredictably</li>
+                <li><strong>Mismatches:</strong> The auto-detected prefix might not match what Star Citizen shows</li>
+              </ul>
+              <p><strong>⚠️ Important:</strong> The prefix you set here is what gets recorded in your keybindings when
+                you press a button on the device. If the prefix is wrong, your bindings will be assigned to the wrong
+                device, and your controls won't work correctly in Star Citizen.</p>
+              <p><strong>✅ Solution:</strong> Use the prefix dropdown on each device to manually set the prefix so that
+                they match your in-game configuration. If you don't know, you can either bind something in Star Citizen
+                to see which device it corresponds to, or experiment with the prefixes here until they match. Generally
+                you can set your right stick to js1, and left to js2. You can always swap swap them on the keybindings
+                page at any time.</p>
+            </div>
+            <div id="dm-device-list" class="dm-device-list">
+              <!-- Device cards will be populated here -->
+            </div>
           </div>
-        </div>
 
-        <!-- Basic Debugger View -->
-        <div id="basic-debugger-view" class="debugger-view">
-          <div class="container">
-            <main>
-              <div class="debugger-controls">
-                <button id="start-debug-btn" class="btn btn-primary">▶ Start Detecting</button>
-                <button id="stop-debug-btn" class="btn btn-secondary" disabled>⏸ Stop Detecting</button>
-                <button id="clear-debug-btn" class="btn btn-secondary">🗑️ Clear Log</button>
-                <button id="show-devices-btn" class="btn btn-secondary">🎮 Show Devices</button>
-                <span id="debug-status" class="status-indicator">Ready</span>
+          <!-- Input Debugger Section -->
+          <div class="dm-section" id="dm-debugger-section">
+            <div class="dm-section-header">
+              <h2 class="dm-section-title">
+                <span class="dm-section-title-icon">🔍</span>
+                Input Debugger
+              </h2>
+              <div class="dm-section-actions">
+                <button id="switch-to-hid-debug" class="btn btn-secondary btn-sm">🔬 View HID Raw Data</button>
               </div>
+            </div>
+            <p class="dm-section-description">
+              Test your devices in real-time. Press buttons, move axes, and verify that your devices are working
+              correctly.
+            </p>
 
-              <div class="timeline-container">
-                <div class="timeline-header">
-                  <h2>Input Timeline</h2>
-                  <div class="timeline-info">
-                    <span id="event-count">0 events</span>
-                    <label>
-                      <input type="checkbox" id="auto-scroll-checkbox" checked>
-                      Auto-scroll
-                    </label>
-                  </div>
-                </div>
-                <div id="timeline" class="timeline">
-                  <div class="timeline-empty">
-                    Press "Start Detecting" and then press any button or move any axis on your joystick...
-                  </div>
-                </div>
-              </div>
+            <div class="dm-debugger-controls">
+              <button id="dm-start-debug-btn" class="btn btn-primary">▶ Start Detecting</button>
+              <button id="dm-stop-debug-btn" class="btn btn-secondary" disabled>⏹️ Stop</button>
+              <button id="dm-clear-debug-btn" class="btn btn-secondary">🗑️ Clear Log</button>
+              <span id="dm-debug-status" class="dm-debug-status">Ready</span>
+            </div>
 
-              <div class="stats-container">
-                <h3>Statistics</h3>
-                <div class="stats-grid">
-                  <div class="stat-card">
-                    <div class="stat-label">Total Events</div>
-                    <div class="stat-value" id="stat-total">0</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Unique Buttons</div>
-                    <div class="stat-value" id="stat-buttons">0</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Unique Axes</div>
-                    <div class="stat-value" id="stat-axes">0</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Hat Switches</div>
-                    <div class="stat-value" id="stat-hats">0</div>
-                  </div>
+            <div class="dm-debugger-timeline-container">
+              <div class="dm-debugger-timeline-header">
+                <h3>Input Timeline</h3>
+                <div class="dm-timeline-info">
+                  <label>
+                    <input type="checkbox" id="dm-auto-scroll-checkbox" checked>
+                    Auto-scroll
+                  </label>
                 </div>
               </div>
-            </main>
+              <div id="dm-debugger-timeline" class="dm-debugger-timeline">
+                <div class="dm-debug-empty">
+                  Press "Start Detecting" to monitor your devices...
+                </div>
+              </div>
+            </div>
+
+            <div class="dm-stats-container">
+              <h3>Statistics</h3>
+              <div class="dm-stats-grid">
+                <div class="dm-stat-card">
+                  <div class="dm-stat-label">Total Events</div>
+                  <div class="dm-stat-value" id="dm-stat-total">0</div>
+                </div>
+                <div class="dm-stat-card">
+                  <div class="dm-stat-label">Buttons</div>
+                  <div class="dm-stat-value" id="dm-stat-buttons">0</div>
+                </div>
+                <div class="dm-stat-card">
+                  <div class="dm-stat-label">Axes</div>
+                  <div class="dm-stat-value" id="dm-stat-axes">0</div>
+                </div>
+                <div class="dm-stat-card">
+                  <div class="dm-stat-label">Hat Switches</div>
+                  <div class="dm-stat-value" id="dm-stat-hats">0</div>
+                </div>
+                <div class="dm-stat-card">
+                  <div class="dm-stat-label">Keys</div>
+                  <div class="dm-stat-value" id="dm-stat-keys">0</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <!-- HID Debugger View (iframe to separate page) -->
-        <div id="hid-debugger-view" class="debugger-view" style="display: none;">
-          <iframe src="hid-debugger.html"
-            style="width: 100%; height: calc(100vh - 180px); border: none; background: var(--bg-dark); overflow-y: auto;"></iframe>
         </div>
       </div>
 
-      <!-- TAB 5: Character Manager Page -->
+      <!-- TAB 4: Character Manager Page -->
       <div id="tab-content-character" class="tab-content">
         <div class="tab-subheader">
           <h2>👤 Character Appearance Manager</h2>
@@ -580,7 +665,7 @@
         </div>
       </div>
 
-      <!-- TAB 6: Help Page -->
+      <!-- TAB 5: Help Page -->
       <div id="tab-content-help" class="tab-content">
         <div class="tab-subheader">
           <h2>❓ Help & Tips</h2>
@@ -756,7 +841,7 @@
         </div>
       </div>
 
-      <!-- TAB 7: Settings Page -->
+      <!-- TAB 6: Settings Page -->
       <div id="tab-content-settings" class="tab-content">
         <div class="tab-subheader">
           <h2>⚙️ Settings & Debug</h2>
@@ -764,11 +849,33 @@
 
         <div class="settings-page-container">
           <div class="settings-section">
-            <h3>🔄 Update Check</h3>
+            <h3>� Star Citizen Installation Directory</h3>
+            <p>Select the base Star Citizen installation directory (the folder containing LIVE, PTU, etc.) This is used
+              for auto-deploying keybindings and managing character appearances.</p>
+            <div class="folder-picker" style="display: flex; gap: 1rem; align-items: center; margin: 1rem 0;">
+              <div class="folder-path empty" id="sc-install-path-display"
+                style="flex: 1; padding: 0.75rem; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-family: 'Consolas', 'Courier New', monospace; font-size: 0.9rem;">
+                No directory selected</div>
+              <button class="btn btn-primary" id="choose-sc-folder-btn">Choose Folder</button>
+            </div>
+            <div id="sc-installations-list" style="margin-top: 1rem;"></div>
+          </div>
+
+          <div class="settings-section">
+            <h3>�🔄 Update Check</h3>
             <p>The application automatically checks for updates every 4 hours. You can manually check for updates now.
             </p>
             <button id="manual-update-check-btn" class="btn btn-primary">🔍 Check for Updates</button>
             <div id="update-check-status" class="info-text" style="margin-top: 1rem; display: none;"></div>
+          </div>
+
+          <div class="settings-section">
+            <h3>🎨 Visual Effects</h3>
+            <p>Customize the visual appearance and effects of the application.</p>
+            <div class="checkbox-container">
+              <input type="checkbox" id="starfield-toggle" checked />
+              <label for="starfield-toggle">Show Animated Starfield Background</label>
+            </div>
           </div>
 
           <div class="settings-section">
@@ -787,6 +894,55 @@
             <button id="reset-cache-btn" class="btn btn-danger">🗑️ Reset Application Cache</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-Save Settings Modal -->
+  <div id="auto-save-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>⚙️ Auto Save Settings</h2>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom: 1rem;">When enabled, keybindings will automatically be deployed to all detected Star
+          Citizen installations when clicking the Save button.</p>
+
+        <div id="auto-save-sc-not-configured" style="display: none;">
+          <div class="warning-box" style="margin-bottom: 1rem;">
+            <p><strong>⚠️ Star Citizen Installation Directory Not Set</strong></p>
+            <p>To use auto-save deployment, you need to configure your Star Citizen installation directory first.</p>
+          </div>
+          <button class="btn btn-primary" id="auto-save-goto-settings-btn">Go to Settings</button>
+        </div>
+
+        <div id="auto-save-sc-configured" style="display: none;">
+          <div class="checkbox-container" style="margin-bottom: 1rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem;">
+              <input type="checkbox" id="auto-save-all-checkbox" style="cursor: pointer;">
+              <span>Automatically deploy to all installations when saving</span>
+            </label>
+          </div>
+
+          <div class="info-box" style="margin-top: 1rem;">
+            <p><strong>💡 How it works:</strong></p>
+            <ul style="margin: 0.5rem 0 0 1.5rem;">
+              <li>The file name will match your currently loaded keybindings file</li>
+              <li>Keybindings will be deployed to all detected installations (LIVE, PTU, etc.)</li>
+              <li>You'll still need to re-import keybindings in the game client</li>
+            </ul>
+          </div>
+
+          <div id="auto-save-installations-preview" style="margin-top: 1rem;">
+            <p style="font-weight: 600; margin-bottom: 0.5rem;">Detected Installations:</p>
+            <div id="auto-save-installations-list"
+              style="font-family: 'Consolas', 'Courier New', monospace; font-size: 0.9rem; color: var(--text-secondary);">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="auto-save-modal-close-btn" class="btn btn-secondary">Close</button>
       </div>
     </div>
   </div>
@@ -852,82 +1008,6 @@
 
   <!-- Hidden file input for loading -->
   <input type="file" id="file-input" accept=".xml" style="display: none;" />
-
-  <!-- Joystick Mapping Modal -->
-  <div id="joystick-mapping-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2>Joystick Remapping</h2>
-      </div>
-      <div class="modal-body">
-        <p class="mapping-help">This feature allows you to override device IDs if they are detected incorrectly. If your
-          joysticks are working with the correct IDs, you can leave this blank. Click "Detect" for each device type you
-          want to remap, then press any button on the physical device.</p>
-        <div
-          style="background: var(--bg-light); border-left: 3px solid #4ec9b0; padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">
-          <strong>ℹ️ Note:</strong> Device remapping is optional. Leave sections blank if your current device IDs are
-          working correctly.
-        </div>
-
-        <div class="stick-mapping-section">
-          <div class="stick-section">
-            <h3>Right Stick (js1)</h3>
-            <div class="stick-info" id="js1-info">
-              <div class="not-configured">Not configured</div>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-              <button id="detect-js1-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect js1</button>
-              <button id="reset-js1-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
-            </div>
-          </div>
-
-          <div class="stick-section">
-            <h3>Left Stick (js2)</h3>
-            <div class="stick-info" id="js2-info">
-              <div class="not-configured">Not configured</div>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-              <button id="detect-js2-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect js2</button>
-              <button id="reset-js2-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
-            </div>
-          </div>
-
-          <div class="stick-section">
-            <h3>Gamepad (gp1)</h3>
-            <div class="stick-info" id="gp1-info">
-              <div class="not-configured">Not configured</div>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-              <button id="detect-gp1-btn" class="btn btn-primary" style="flex: 1;">🎮 Detect gp1</button>
-              <button id="reset-gp1-btn" class="btn btn-secondary" title="Reset to default">↻ Reset</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="joystick-mapping-save" class="btn btn-success">Save Mapping</button>
-        <button id="joystick-mapping-cancel" class="btn btn-secondary">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Device List Modal (for Input Debugger) -->
-  <div id="device-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2>Connected Devices</h2>
-        <button class="modal-close" id="close-modal-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div id="device-modal-list" class="device-list">
-          <!-- Device cards will be populated here -->
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="close-device-modal-footer" class="btn btn-secondary">Close</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Button Details Modal (for Template Editor) -->
   <div id="button-modal" class="modal" style="display: none;">
@@ -1038,18 +1118,18 @@
   <div id="template-page-modal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 610px;">
       <div class="modal-header">
-        <h2 id="template-page-modal-title">Add Page</h2>
+        <h2 id="template-page-modal-title">Add Device</h2>
       </div>
       <div class="modal-body">
         <!-- Basic Info Section -->
         <div class="modal-section">
           <h3 class="section-title">Basic Information</h3>
           <label>
-            Page Name:
+            Device Name:
             <input type="text" id="template-page-name" placeholder="e.g., Left Stick" />
           </label>
           <label style="margin-top: 1rem;">
-            Joystick ID Prefix:
+            Device ID Prefix:
             <select id="template-page-prefix"
               style="width: 100%; padding: 8px; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
               <option value="">Default (Auto)</option>
@@ -1061,59 +1141,33 @@
               <option value="gp2">gp2</option>
             </select>
             <div class="info-text" style="margin-top: 0.25rem;">
-              Force this page to use a specific device ID (e.g. js1) regardless of detection. Useful if your devices are
+              Force this device to use a specific device ID (e.g. js1) regardless of detection. Useful if your devices
+              are
               swapped.
             </div>
           </label>
         </div>
 
-        <!-- Device Section -->
         <div class="modal-section">
-          <h3 class="section-title">Device Configuration</h3>
-          <label>
-            Device:
-            <div class="device-detection-box">
-              <div id="detected-device-info" class="detected-device-info">
-                <span class="device-icon">🎮</span>
-                <div class="device-info-text">
-                  <span id="detected-device-name" class="device-name">No device detected</span>
-                  <span id="detected-device-uuid" class="device-uuid" style="display: none;"></span>
-                </div>
-              </div>
-              <div style="margin-top: 0.75rem;">
-                <label style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 0.25rem; display: block;">
-                  Select The Device:
-                </label>
-                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
-                  <select id="page-device-select" style="flex: 1;"></select>
-                  <button id="refresh-devices-btn" class="btn btn-secondary btn-sm"
-                    title="Refresh device list">🔄</button>
-                </div>
-                <hr>
-                <label style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 0.25rem; display: block;">
-                  Or Auto Detect The Device:
-                </label>
-              </div>
-              <button id="detect-device-btn" class="btn btn-primary">🎯 Press Button on Device</button>
-              <div id="device-detection-status" class="info-text" style="margin-top: 0.5rem;">
-                Press any button on your joystick or gamepad to identify it.
-              </div>
-            </div>
-          </label>
-
-          <div class="device-detection-box">
-
-            <label>
-              Axis Detection:
-              <div class="info-text" id="template-page-axis-summary">Using HID descriptor axis detection</div>
-            </label>
-
-            <div class="custom-axis-actions">
-              <button id="open-custom-axis-modal" class="btn btn-secondary btn-sm">Configure Custom Mapping</button>
-              <span class="info-text">Use this if your device needs a custom axis mapping.</span>
-            </div>
+          <h3 class="section-title">Device Prefix</h3>
+          <select id="template-page-prefix-select"
+            style="width: 100%; padding: 8px; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+            <option value="">Default (Auto)</option>
+            <option value="js1">js1</option>
+            <option value="js2">js2</option>
+            <option value="js3">js3</option>
+            <option value="js4">js4</option>
+            <option value="js5">js5</option>
+            <option value="gp1">gp1</option>
+            <option value="gp2">gp2</option>
+            <option value="gp3">gp3</option>
+            <option value="gp4">gp4</option>
+            <option value="gp5">gp5</option>
+          </select>
+          <div class="info-text" style="margin-top: 0.25rem;">
+            Specify the device prefix to force this device to use a specific ID (e.g., js1). Leave as default for
+            auto-detection.
           </div>
-
         </div>
 
         <!-- Image Section -->
@@ -1256,29 +1310,28 @@
   <div id="whats-new-modal" class="modal" style="display: none;">
     <div class="modal-content whats-new-modal-content">
       <div class="modal-header">
-        <h2>🎉 What's New in v0.8.0</h2>
+        <h2>🎉 What's New in v0.9.0</h2>
       </div>
       <div class="modal-body whats-new-body">
         <div class="whats-new-section">
           <h3>✨ New Features</h3>
           <ul>
-            <li><strong>New Axis Detection:</strong> Using a new backend for axis detection based on HID descriptors for
-              more accurate and dynamic axis mapping (shotout to Biotic for the HID libraries).
-            </li>
-            <li><strong>Character Manager:</strong> Added a character manager to backup and deploy your saved character
-              files to/from multiple Star Citizen installations.</li>
+          </ul>
         </div>
         <div class="whats-new-section">
           <h3>🔧 Improvements</h3>
           <ul>
-            <li><strong>Template Editor: </strong>With new axis system, axis remapping is now optional, and has been
-              simplified.</li>
-            <li><strong>Template Editor: </strong>Added device prefix override per page.</li>
+            <li><strong>UI/UX Pass:</strong> Improved overall user interface and experience for easier navigation and
+              use.</li>
+            <li><strong>Themes: </strong>Added a new dark mode theme option.</li>
           </ul>
         </div>
         <div class="whats-new-section">
           <h3>🐛 Bug Fixes</h3>
           <ul>
+          </ul>
+          <li><strong>Button Detection:</strong> Fixed inputs sometimes not registering</li>
+          <li><strong>Fixed:</strong> Various minor bugs and stability improvements.</li>
           </ul>
         </div>
         <div class="whats-new-footer">
@@ -1312,7 +1365,8 @@
         <div class="warning-box" style="margin-bottom: 1.5rem;">
           <p><strong>⚠️ Warning:</strong> This will create a special unbinding profile that <strong>forcefully unbinds
               ALL selected device inputs</strong> in Star Citizen.</p>
-          <p>Use this when you want to start with a completely clean slate in-game.</p>
+          <p>This is helpful if you have leftover binds from previous profiles or want to reset your controls from
+            scratch.</p>
         </div>
 
         <h3 style="margin-bottom: 1rem;">Select devices to unbind:</h3>

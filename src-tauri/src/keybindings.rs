@@ -158,18 +158,14 @@ impl Rebind {
         let mut remaining_input = input;
 
         // Extract all modifiers from the beginning (case-insensitive)
-        loop {
-            if let Some((prefix, rest)) = remaining_input.split_once('+') {
-                let prefix_upper = prefix.trim().to_uppercase();
-                if matches!(
-                    prefix_upper.as_str(),
-                    "LALT" | "RALT" | "LCTRL" | "RCTRL" | "LSHIFT" | "RSHIFT"
-                ) {
-                    modifiers.push(prefix_upper);
-                    remaining_input = rest;
-                } else {
-                    break;
-                }
+        while let Some((prefix, rest)) = remaining_input.split_once('+') {
+            let prefix_upper = prefix.trim().to_uppercase();
+            if matches!(
+                prefix_upper.as_str(),
+                "LALT" | "RALT" | "LCTRL" | "RCTRL" | "LSHIFT" | "RSHIFT"
+            ) {
+                modifiers.push(prefix_upper);
+                remaining_input = rest;
             } else {
                 break;
             }
@@ -513,13 +509,12 @@ impl ActionMaps {
         // First pass: collect categories in the order they appear in AllBinds
         if let Some(all_binds) = all_binds {
             for all_binds_map in &all_binds.action_maps {
-                if actionmaps_with_bindings.contains(&all_binds_map.name) {
-                    if !all_binds_map.ui_category.is_empty()
-                        && !seen_categories.contains(&all_binds_map.ui_category)
-                    {
-                        categories_ordered.push(all_binds_map.ui_category.clone());
-                        seen_categories.insert(all_binds_map.ui_category.clone());
-                    }
+                if actionmaps_with_bindings.contains(&all_binds_map.name)
+                    && !all_binds_map.ui_category.is_empty()
+                    && !seen_categories.contains(&all_binds_map.ui_category)
+                {
+                    categories_ordered.push(all_binds_map.ui_category.clone());
+                    seen_categories.insert(all_binds_map.ui_category.clone());
                 }
             }
         }

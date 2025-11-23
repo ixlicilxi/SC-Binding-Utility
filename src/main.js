@@ -70,7 +70,7 @@ let countdownInterval = null;
 let secondaryDetectionTimeout = null;
 let hasUnsavedChanges = false;
 let customizedOnly = false;
-let showDefaultBindings = true;
+let showUnboundActions = true;
 let currentTab = 'main';
 let categoryFriendlyNames = {};
 let currentFilename = null; // Track the current file name for the copy command
@@ -553,7 +553,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.8.2';
+  const CURRENT_VERSION = '0.9.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -568,7 +568,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.8.2';
+  const CURRENT_VERSION = '0.9.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -610,6 +610,12 @@ window.showWhatsNewModal = showWhatsNewModal;
 // Main app initialization
 window.addEventListener("DOMContentLoaded", async () =>
 {
+  // Load device prefix mappings early (before any device detection happens)
+  if (window.loadDevicePrefixMappings)
+  {
+    window.loadDevicePrefixMappings();
+  }
+
   initializeEventListeners();
   initializeTabSystem();
   initializeWhatsNewModal();
@@ -626,17 +632,14 @@ window.addEventListener("DOMContentLoaded", async () =>
   const tabWelcome = document.getElementById('tab-welcome');
   if (tabWelcome) { new Tooltip(tabWelcome, 'Welcome & Getting Started'); }
 
-  const tabMain = document.getElementById('tab-main');
-  if (tabMain) { new Tooltip(tabMain, 'Edit Keybindings'); }
-
-  const tabVisual = document.getElementById('tab-visual');
-  if (tabVisual) { new Tooltip(tabVisual, 'Visual Joystick View'); }
+  const tabBindings = document.getElementById('tab-bindings');
+  if (tabBindings) { new Tooltip(tabBindings, 'View & Edit Keybindings'); }
 
   const tabTemplate = document.getElementById('tab-template');
   if (tabTemplate) { new Tooltip(tabTemplate, 'Create & Edit Templates'); }
 
   const tabDebugger = document.getElementById('tab-debugger');
-  if (tabDebugger) { new Tooltip(tabDebugger, 'Test Input Devices'); }
+  if (tabDebugger) { new Tooltip(tabDebugger, 'Map and test input devices. Useful if your input devices don\'t match star citizen\'s expected inputs'); }
 
   const tabCharacter = document.getElementById('tab-character');
   if (tabCharacter) { new Tooltip(tabCharacter, 'Manage Character Appearances'); }
@@ -652,10 +655,24 @@ window.addEventListener("DOMContentLoaded", async () =>
   if (newKeybindingBtn) { new Tooltip(newKeybindingBtn, 'Start with a fresh keybinding set'); }
 
   const configureJoystickBtn = document.getElementById('configure-joystick-mapping-btn');
-  if (configureJoystickBtn) { new Tooltip(configureJoystickBtn, 'Map your physical devices to device IDs if needed'); }
+  if (configureJoystickBtn) { new Tooltip(configureJoystickBtn, 'Open Device Manager to configure device IDs and test inputs'); }
 
   const clearSCBindsBtn = document.getElementById('clear-sc-binds-btn');
   if (clearSCBindsBtn) { new Tooltip(clearSCBindsBtn, 'Generate a profile to unbind all devices'); }
+
+  // Bindings sub-nav tooltips
+  const listViewBtn = document.getElementById('bindings-view-list');
+  if (listViewBtn) { new Tooltip(listViewBtn, 'View keybindings as a filterable list'); }
+
+  const visualViewBtn = document.getElementById('bindings-view-visual');
+  if (visualViewBtn) { new Tooltip(visualViewBtn, 'View keybindings on a visual joystick layout'); }
+
+  // Filter checkbox tooltips
+  const customizedWrapper = document.getElementById('customized-only-wrapper');
+  if (customizedWrapper) { new Tooltip(customizedWrapper, 'When enabled, only shows actions that have been customized by the user. When disabled, shows all available actions.'); }
+
+  const showUnboundWrapper = document.getElementById('show-unbound-wrapper');
+  if (showUnboundWrapper) { new Tooltip(showUnboundWrapper, 'When enabled, includes actions that have no bindings assigned. When disabled, hides actions without any bindings.'); }
 
   // Initialize custom dropdown for activation mode with tooltips
   const activationModeSelect = document.getElementById('activation-mode-select');
@@ -696,15 +713,34 @@ window.addEventListener("DOMContentLoaded", async () =>
     // Don't block app startup if update checker fails
   }
 
-  // Show default file indicator
-  document.getElementById('loaded-file-indicator').style.display = 'flex';
+  // Show default file indicator in both locations
+  const indicator = document.getElementById('loaded-file-indicator');
+  if (indicator) indicator.style.display = 'flex';
+  const indicatorSub = document.getElementById('loaded-file-indicator-sub');
+  if (indicatorSub) indicatorSub.style.display = 'flex';
 
-  // Load persisted template name
-  const savedTemplateName = localStorage.getItem('currentTemplateName');
-  if (savedTemplateName)
+  // Load persisted template name based on which tab was last active
+  const lastTab = localStorage.getItem('currentTab') || 'welcome';
+
+  if (lastTab === 'template')
   {
-    const savedFileName = localStorage.getItem('templateFileName');
-    updateTemplateIndicator(savedTemplateName, savedFileName);
+    // Template editor was last active - load its template
+    const savedTemplateName = localStorage.getItem('currentTemplateName');
+    if (savedTemplateName)
+    {
+      const savedFileName = localStorage.getItem('editorTemplateFileName');
+      updateTemplateIndicator(savedTemplateName, savedFileName);
+    }
+  }
+  else if (lastTab === 'bindings')
+  {
+    // Visual viewer might have been active - check if it has a template
+    const viewerTemplateName = localStorage.getItem('viewerCurrentTemplateName');
+    if (viewerTemplateName)
+    {
+      const viewerFileName = localStorage.getItem('viewerTemplateFileName');
+      updateViewerTemplateIndicator(viewerTemplateName, viewerFileName);
+    }
   }
 
   // Load categories
@@ -743,18 +779,157 @@ function initializeTabSystem()
     });
   });
 
+  // Add bindings sub-navigation handlers
+  document.querySelectorAll('.bindings-view-btn').forEach(btn =>
+  {
+    btn.addEventListener('click', (e) =>
+    {
+      const viewName = e.currentTarget.dataset.view;
+      if (!viewName) return;
+      switchBindingsView(viewName);
+    });
+  });
+
   // Save current tab to localStorage
   const savedTab = localStorage.getItem('currentTab') || 'welcome';
+  const savedBindingsView = localStorage.getItem('bindingsView') || 'list';
   switchTab(savedTab);
+  if (savedTab === 'bindings')
+  {
+    switchBindingsView(savedBindingsView);
+  }
 
   // Initialize settings page elements
   initializeSettingsPage();
+}
+
+/**
+ * Switch between list and visual views within the Bindings tab
+ */
+function switchBindingsView(viewName)
+{
+  // Update active view button
+  document.querySelectorAll('.bindings-view-btn').forEach(btn =>
+  {
+    btn.classList.toggle('active', btn.dataset.view === viewName);
+  });
+
+  // Update active view container
+  document.querySelectorAll('.bindings-view-container').forEach(container =>
+  {
+    const isListView = container.id === 'bindings-list-view';
+    const isVisualView = container.id === 'bindings-visual-view';
+
+    if ((isListView && viewName === 'list') || (isVisualView && viewName === 'visual'))
+    {
+      container.classList.add('active');
+    } else
+    {
+      container.classList.remove('active');
+    }
+  });
+
+  // Save to localStorage
+  localStorage.setItem('bindingsView', viewName);
+
+  // Handle view-specific initialization
+  if (viewName === 'visual')
+  {
+    // Initialize visual view if needed
+    if (window.initializeVisualView)
+    {
+      window.initializeVisualView();
+    }
+    // Refresh visual view when switching to it
+    if (window.refreshVisualView)
+    {
+      window.refreshVisualView();
+    }
+  }
+}
+
+// ============================================================================
+// SETTINGS PAGE AND SC DIRECTORY FUNCTIONS
+// ============================================================================
+
+function updateScDirectoryButtonIcon()
+{
+  const scDirectoryBtn = document.getElementById('sc-directory-btn');
+  const scDirectoryIcon = document.getElementById('sc-directory-icon');
+  const savedPath = localStorage.getItem('scInstallDirectory');
+  if (scDirectoryIcon)
+  {
+    if (savedPath)
+    {
+      scDirectoryIcon.textContent = '⚙️';
+      scDirectoryBtn.title = 'Configure auto-save deployment settings';
+    } else
+    {
+      scDirectoryIcon.textContent = '⚠️';
+      scDirectoryBtn.title = 'Auto-save not configured - click to set up';
+    }
+  }
 }
 
 function initializeSettingsPage()
 {
   const resetCacheBtn = document.getElementById('reset-cache-btn');
   const manualUpdateCheckBtn = document.getElementById('manual-update-check-btn');
+  const starfieldToggle = document.getElementById('starfield-toggle');
+  const chooseSCFolderBtn = document.getElementById('choose-sc-folder-btn');
+  const scInstallPathDisplay = document.getElementById('sc-install-path-display');
+  const scInstallationsList = document.getElementById('sc-installations-list');
+
+  // SC Installation Directory picker
+  if (chooseSCFolderBtn)
+  {
+    chooseSCFolderBtn.addEventListener('click', async () =>
+    {
+      try
+      {
+        const selectedPath = await open({
+          directory: true,
+          multiple: false,
+          title: 'Select Star Citizen Installation Directory'
+        });
+
+        if (selectedPath)
+        {
+          scInstallPathDisplay.textContent = selectedPath;
+          scInstallPathDisplay.classList.remove('empty');
+          localStorage.setItem('scInstallDirectory', selectedPath);
+
+          // Scan for installations
+          await updateSCInstallationsList(selectedPath);
+
+          // Update the button icon in keybindings toolbar
+          updateScDirectoryButtonIcon();
+        }
+      } catch (error)
+      {
+        console.error('Error selecting SC folder:', error);
+        await showAlert(`Error selecting folder: ${error}`, 'Error');
+      }
+    });
+  }
+
+  // Load saved SC directory on page load
+  const savedSCPath = localStorage.getItem('scInstallDirectory');
+  if (savedSCPath && scInstallPathDisplay)
+  {
+    scInstallPathDisplay.textContent = savedSCPath;
+    scInstallPathDisplay.classList.remove('empty');
+    updateSCInstallationsList(savedSCPath);
+  }
+
+  // Starfield visibility toggle
+  if (starfieldToggle)
+  {
+    starfieldToggle.addEventListener('change', (e) =>
+    {
+      window.toggleStarfield(e.target.checked);
+    });
+  }
 
   // Reset cache button
   if (resetCacheBtn)
@@ -810,6 +985,40 @@ function initializeSettingsPage()
   }
 }
 
+async function updateSCInstallationsList(basePath)
+{
+  const scInstallationsList = document.getElementById('sc-installations-list');
+  if (!scInstallationsList) return;
+
+  try
+  {
+    scInstallationsList.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.9rem;">Scanning...</div>';
+
+    const installations = await invoke('scan_sc_installations', { basePath });
+
+    if (installations.length === 0)
+    {
+      scInstallationsList.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.9rem; font-style: italic;">No installations found</div>';
+    } else
+    {
+      const installationsHTML = installations.map(inst => `
+        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 0.5rem;">
+          <span style="font-size: 1.2rem;">🚀</span>
+          <div style="flex: 1;">
+            <div style="font-weight: 600; color: #4ec9b0;">${inst.name}</div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); font-family: 'Consolas', 'Courier New', monospace;">${inst.path}</div>
+          </div>
+        </div>
+      `).join('');
+      scInstallationsList.innerHTML = installationsHTML;
+    }
+  } catch (error)
+  {
+    console.error('Error scanning SC installations:', error);
+    scInstallationsList.innerHTML = `<div style="color: #ff6464; font-size: 0.9rem;">Error: ${error}</div>`;
+  }
+}
+
 async function loadCategoryMappings()
 {
   try
@@ -822,43 +1031,19 @@ async function loadCategoryMappings()
     }
     const data = await response.json();
 
-    // Convert array of objects to a flat mapping object
-    // e.g., { "@ui_CCSpaceFlight": "Space Flight Controls", ... }
-    categoryFriendlyNames = {};
-    data.categories.forEach(categoryObj =>
-    {
-      // Each category object has one key-value pair
-      const entries = Object.entries(categoryObj);
-      if (entries.length > 0)
-      {
-        const [key, value] = entries[0];
-        categoryFriendlyNames[key] = value;
-      }
-    });
+    // The new Categories.json is already a flat mapping object
+    categoryFriendlyNames = data;
 
-    console.log('Category mappings loaded:', categoryFriendlyNames);
+    console.log('Category mappings loaded:', Object.keys(categoryFriendlyNames).length);
   } catch (error)
   {
     console.error('Error loading Categories.json:', error);
     // Set default fallback mapping to ensure the app still works
     categoryFriendlyNames = {
-      '@ui_CCSeatGeneral': 'General Seat Controls',
-      '@ui_CCSpaceFlight': 'Space Flight Controls',
-      '@ui_CCOrientationControl': 'Orientation Control',
-      '@ui_CCFlightModes': 'Flight Modes',
-      '@ui_CCTurrets': 'Turrets',
-      '@ui_CGLightControllerDesc': 'Light Controller',
-      '@ui_CCFPS': 'First Person Shooter Controls',
-      '@ui_CCEVA': 'EVA Controls',
-      '@ui_CCEVAZGT': 'EVA Zero Gravity Traversal',
-      '@ui_CCVehicle': 'Vehicle Controls',
-      '@ui_CC_DriveModes': 'Drive Modes',
-      '@ui_CGEASpectator': 'Spectator Mode',
-      '@ui_CGUIGeneral': 'General UI Controls',
-      '@ui_CGOpticalTracking': 'Optical Tracking',
-      '@ui_CGInteraction': 'Interaction',
-      '@ui_CCCamera': 'Camera Controls',
-      '': 'Uncategorized'
+      '@ui_CCSeatGeneral': 'vehicle',
+      '@ui_CCSpaceFlight': 'vehicle',
+      '@ui_CCFPS': ['on foot'],
+      '': 'other'
     };
   }
 }
@@ -886,25 +1071,18 @@ function switchTab(tabName)
   });
 
   // Update body class for CSS selectors to show/hide template info
-  document.body.classList.remove('tab-welcome', 'tab-main', 'tab-visual', 'tab-template', 'tab-debugger', 'tab-character', 'tab-help', 'tab-settings');
+  document.body.classList.remove('tab-welcome', 'tab-bindings', 'tab-template', 'tab-debugger', 'tab-character', 'tab-help', 'tab-settings');
   document.body.classList.add(`tab-${tabName}`);
 
   // Save to localStorage
   localStorage.setItem('currentTab', tabName);
 
   // Handle tab-specific initialization
-  if (tabName === 'visual')
+  if (tabName === 'bindings')
   {
-    // Initialize visual view if needed
-    if (window.initializeVisualView)
-    {
-      window.initializeVisualView();
-    }
-    // Refresh visual view when switching to it
-    if (window.refreshVisualView)
-    {
-      window.refreshVisualView();
-    }
+    // Restore last used bindings view
+    const savedBindingsView = localStorage.getItem('bindingsView') || 'list';
+    switchBindingsView(savedBindingsView);
   }
   else if (tabName === 'template')
   {
@@ -924,10 +1102,10 @@ function switchTab(tabName)
   }
   else if (tabName === 'debugger')
   {
-    // Initialize debugger if needed
-    if (window.initializeDebugger)
+    // Initialize device manager if needed
+    if (window.initializeDeviceManager)
     {
-      window.initializeDebugger();
+      window.initializeDeviceManager();
     }
   }
 }
@@ -949,17 +1127,44 @@ function initializeEventListeners()
   if (loadBtn) loadBtn.addEventListener('click', loadKeybindingsFile);
   if (welcomeLoadBtn) welcomeLoadBtn.addEventListener('click', loadKeybindingsFile);
 
+  // Welcome screen "Create New Set" button
+  const welcomeNewBtn = document.getElementById('welcome-new-btn');
+  if (welcomeNewBtn) welcomeNewBtn.addEventListener('click', newKeybinding);
+
   // Save buttons
   const saveBtn = document.getElementById('save-btn');
   const saveAsBtn = document.getElementById('save-as-btn');
   if (saveBtn) saveBtn.addEventListener('click', saveKeybindings);
   if (saveAsBtn) saveAsBtn.addEventListener('click', saveKeybindingsAs);
 
-  // SC Directory button
+  // SC Directory / Auto-Save Settings button
   const scDirectoryBtn = document.getElementById('sc-directory-btn');
-  if (scDirectoryBtn) scDirectoryBtn.addEventListener('click', () =>
+  const scDirectoryIcon = document.getElementById('sc-directory-icon');
+
+  if (scDirectoryBtn) scDirectoryBtn.addEventListener('click', async () =>
   {
-    window.location.href = 'sc-directory.html';
+    await openAutoSaveModal();
+  });
+
+  // Update icon on page load
+  updateScDirectoryButtonIcon();
+
+  // Listen for storage changes to update icon if it changes in another tab
+  window.addEventListener('storage', (e) =>
+  {
+    if (e.key === 'scInstallDirectory')
+    {
+      updateScDirectoryButtonIcon();
+    }
+  });
+
+  // Update icon when page becomes visible (user returns from settings page)
+  document.addEventListener('visibilitychange', () =>
+  {
+    if (!document.hidden)
+    {
+      updateScDirectoryButtonIcon();
+    }
   });
 
   // Ko-fi header button
@@ -979,24 +1184,14 @@ function initializeEventListeners()
     }, 50);
   });
 
-  // Debugger view switchers
-  const switchToBasicDebug = document.getElementById('switch-to-basic-debug');
+  // HID debugger view switcher
   const switchToHIDDebug = document.getElementById('switch-to-hid-debug');
-  if (switchToBasicDebug && switchToHIDDebug)
+  if (switchToHIDDebug)
   {
-    switchToBasicDebug.addEventListener('click', () =>
-    {
-      document.getElementById('basic-debugger-view').style.display = 'block';
-      document.getElementById('hid-debugger-view').style.display = 'none';
-      switchToBasicDebug.classList.add('active');
-      switchToHIDDebug.classList.remove('active');
-    });
     switchToHIDDebug.addEventListener('click', () =>
     {
-      document.getElementById('basic-debugger-view').style.display = 'none';
-      document.getElementById('hid-debugger-view').style.display = 'block';
-      switchToBasicDebug.classList.remove('active');
-      switchToHIDDebug.classList.add('active');
+      // Navigate to HID debugger page
+      window.location.href = 'hid-debugger.html';
     });
   }
 
@@ -1089,13 +1284,13 @@ function initializeEventListeners()
     });
   }
 
-  const showDefaultsCheckbox = document.getElementById('show-defaults-checkbox');
-  if (showDefaultsCheckbox)
+  const showUnboundCheckbox = document.getElementById('show-unbound-checkbox');
+  if (showUnboundCheckbox)
   {
-    showDefaultsCheckbox.checked = showDefaultBindings;
-    showDefaultsCheckbox.addEventListener('change', (e) =>
+    showUnboundCheckbox.checked = showUnboundActions;
+    showUnboundCheckbox.addEventListener('change', (e) =>
     {
-      showDefaultBindings = e.target.checked;
+      showUnboundActions = e.target.checked;
       renderKeybindings();
     });
   }
@@ -1147,27 +1342,9 @@ function initializeEventListeners()
   if (conflictCancelBtn) conflictCancelBtn.addEventListener('click', closeConflictModal);
   if (conflictConfirmBtn) conflictConfirmBtn.addEventListener('click', confirmConflictBinding);
 
-  // Joystick mapping modal buttons
+  // Joystick mapping button - now switches to Device Manager tab
   const configureBtn = document.getElementById('configure-joystick-mapping-btn');
-  const joyMappingClose = document.getElementById('joystick-mapping-close');
-  const joyMappingCancel = document.getElementById('joystick-mapping-cancel');
-  const detectJs1Btn = document.getElementById('detect-js1-btn');
-  const detectJs2Btn = document.getElementById('detect-js2-btn');
-  const detectGp1Btn = document.getElementById('detect-gp1-btn');
-  const resetJs1Btn = document.getElementById('reset-js1-btn');
-  const resetJs2Btn = document.getElementById('reset-js2-btn');
-  const resetGp1Btn = document.getElementById('reset-gp1-btn');
-  const joyMappingSave = document.getElementById('joystick-mapping-save');
-  if (configureBtn) configureBtn.addEventListener('click', openJoystickMappingModal);
-  if (joyMappingClose) joyMappingClose.addEventListener('click', closeJoystickMappingModal);
-  if (joyMappingCancel) joyMappingCancel.addEventListener('click', closeJoystickMappingModal);
-  if (detectJs1Btn) detectJs1Btn.addEventListener('click', () => detectDevice('js1'));
-  if (detectJs2Btn) detectJs2Btn.addEventListener('click', () => detectDevice('js2'));
-  if (detectGp1Btn) detectGp1Btn.addEventListener('click', () => detectDevice('gp1'));
-  if (resetJs1Btn) resetJs1Btn.addEventListener('click', () => resetDeviceMapping('js1'));
-  if (resetJs2Btn) resetJs2Btn.addEventListener('click', () => resetDeviceMapping('js2'));
-  if (resetGp1Btn) resetGp1Btn.addEventListener('click', () => resetDeviceMapping('gp1'));
-  if (joyMappingSave) joyMappingSave.addEventListener('click', saveJoystickMapping);
+  if (configureBtn) configureBtn.addEventListener('click', () => switchTab('debugger'));
 
   // New Keybinding button
   const newKeybindingBtn = document.getElementById('new-keybinding-btn');
@@ -1184,6 +1361,34 @@ function initializeEventListeners()
   if (clearBindsGenerateBtn) clearBindsGenerateBtn.addEventListener('click', generateUnbindProfile);
   if (copyUnbindCommandBtn) copyUnbindCommandBtn.addEventListener('click', copyUnbindCommand);
   if (removeUnbindFilesBtn) removeUnbindFilesBtn.addEventListener('click', removeUnbindFiles);
+
+  // Auto-Save modal buttons
+  const autoSaveModalCloseBtn = document.getElementById('auto-save-modal-close-btn');
+  const autoSaveGotoSettingsBtn = document.getElementById('auto-save-goto-settings-btn');
+  const autoSaveAllCheckbox = document.getElementById('auto-save-all-checkbox');
+
+  if (autoSaveModalCloseBtn)
+  {
+    autoSaveModalCloseBtn.addEventListener('click', closeAutoSaveModal);
+  }
+
+  if (autoSaveGotoSettingsBtn)
+  {
+    autoSaveGotoSettingsBtn.addEventListener('click', () =>
+    {
+      closeAutoSaveModal();
+      switchTab('settings');
+    });
+  }
+
+  if (autoSaveAllCheckbox)
+  {
+    autoSaveAllCheckbox.addEventListener('change', (e) =>
+    {
+      localStorage.setItem('autoSaveToAllInstallations', e.target.checked.toString());
+      console.log('Auto-save to all installations:', e.target.checked);
+    });
+  }
 }
 
 async function loadKeybindingsFile()
@@ -1225,6 +1430,12 @@ async function loadKeybindingsFile()
     // Update UI
     displayKeybindings();
     updateFileIndicator(filePath);
+
+    // Refresh the visual view if it's loaded and visible
+    if (window.refreshVisualView)
+    {
+      await window.refreshVisualView();
+    }
 
   } catch (error)
   {
@@ -1366,19 +1577,29 @@ async function loadAllBindsOnly()
 {
   try
   {
-    // Get merged bindings with no user customizations
-    currentKeybindings = await invoke('get_merged_bindings');
-
-    // No need to cache - AllBinds is always available and this is the default state
-    hasUnsavedChanges = false;
-    localStorage.setItem('hasUnsavedChanges', 'false');
-
-    displayKeybindings();
+    // Don't auto-load AllBinds - show welcome screen instead
+    // User can create a new keybinding set or load an existing one
+    showWelcomeScreen();
   } catch (error)
   {
-    console.error('Error loading AllBinds:', error);
-    // Show welcome screen if AllBinds failed to load
+    console.error('Error in loadAllBindsOnly:', error);
+    showWelcomeScreen();
   }
+}
+
+function showWelcomeScreen()
+{
+  // Show welcome screen
+  document.getElementById('welcome-screen').style.display = 'flex';
+  document.getElementById('bindings-content').style.display = 'none';
+
+  // Disable save buttons
+  document.getElementById('save-btn').disabled = true;
+  document.getElementById('save-as-btn').disabled = true;
+
+  // Reset state
+  currentKeybindings = null;
+  hasUnsavedChanges = false;
 }
 
 /**
@@ -1482,6 +1703,8 @@ function updateFileIndicator(filePath)
 {
   const indicator = document.getElementById('loaded-file-indicator');
   const fileNameEl = document.getElementById('loaded-file-name');
+  const indicatorSub = document.getElementById('loaded-file-indicator-sub');
+  const fileNameSubEl = document.getElementById('loaded-file-name-sub');
 
   if (indicator && fileNameEl)
   {
@@ -1490,17 +1713,33 @@ function updateFileIndicator(filePath)
     fileNameEl.textContent = fileName;
     indicator.style.display = 'flex';
   }
+
+  if (indicatorSub && fileNameSubEl)
+  {
+    // Update sub-nav indicator too
+    const fileName = filePath.split(/[\\/]/).pop();
+    fileNameSubEl.textContent = fileName;
+    indicatorSub.style.display = 'flex';
+  }
 }
 
 function showUnsavedFileIndicator()
 {
   const indicator = document.getElementById('loaded-file-indicator');
   const fileNameEl = document.getElementById('loaded-file-name');
+  const indicatorSub = document.getElementById('loaded-file-indicator-sub');
+  const fileNameSubEl = document.getElementById('loaded-file-name-sub');
 
   if (indicator && fileNameEl)
   {
     fileNameEl.textContent = 'Unsaved Keybinding Set';
     indicator.style.display = 'flex';
+  }
+
+  if (indicatorSub && fileNameSubEl)
+  {
+    fileNameSubEl.textContent = 'Unsaved Keybinding Set';
+    indicatorSub.style.display = 'flex';
   }
 }
 
@@ -1526,8 +1765,34 @@ function updateTemplateIndicator(templateName, fileName = null)
   }
 }
 
-// Make it globally accessible
+/**
+ * Update the template indicator for the visual viewer (separate from template editor)
+ * This ensures the visual viewer's template doesn't affect the template editor's state
+ */
+function updateViewerTemplateIndicator(templateName, fileName = null)
+{
+  const templateNameEl = document.getElementById('header-template-name');
+  console.log('updateViewerTemplateIndicator called with:', templateName, fileName);
+  if (templateNameEl)
+  {
+    let displayText = templateName || 'Untitled Template';
+    if (fileName)
+    {
+      displayText += ` (${fileName})`;
+    }
+    templateNameEl.textContent = displayText;
+    console.log('Updated header (viewer) to:', templateNameEl.textContent);
+  }
+  // Save to viewer-specific localStorage key
+  if (templateName)
+  {
+    localStorage.setItem('viewerCurrentTemplateName', templateName);
+  }
+}
+
+// Make updateTemplateIndicator and updateViewerTemplateIndicator globally available for other modules
 window.updateTemplateIndicator = updateTemplateIndicator;
+window.updateViewerTemplateIndicator = updateViewerTemplateIndicator;
 
 // Helper to call updateTemplateIndicator safely (waits if not yet defined)
 window.safeUpdateTemplateIndicator = function (name)
@@ -1545,8 +1810,11 @@ window.safeUpdateTemplateIndicator = function (name)
 // Search for a button ID in the main keybindings view
 window.searchMainTabForButtonId = function (buttonId)
 {
-  // Switch to the main tab
-  switchTab('main');
+  // Switch to the bindings tab
+  switchTab('bindings');
+
+  // Switch to list view
+  switchBindingsView('list');
 
   // Get the search input element
   const searchInput = document.getElementById('search-input');
@@ -1755,6 +2023,12 @@ function updateCopyCommandButtonVisibility()
   }
 }
 
+// Make switchTab globally available for other modules
+window.switchTab = switchTab;
+
+// Make switchBindingsView globally available for other modules
+window.switchBindingsView = switchBindingsView;
+
 function displayKeybindings()
 {
   if (!currentKeybindings) return;
@@ -1766,10 +2040,6 @@ function displayKeybindings()
   // Enable save buttons
   document.getElementById('save-btn').disabled = false;
   document.getElementById('save-as-btn').disabled = false;
-
-  // Update profile name - use a default if not available
-  const profileName = currentKeybindings.profile_name || 'Star Citizen Keybindings';
-  document.getElementById('profile-name').textContent = profileName;
 
   // Update copy command button visibility
   updateCopyCommandButtonVisibility();
@@ -1794,26 +2064,85 @@ function renderCategories()
 {
   const categoryList = document.getElementById('category-list');
 
-  // Group action maps by their UICategory
+  // Group action maps by their mapped category
   const categoryGroups = new Map();
 
   currentKeybindings.action_maps.forEach(actionMap =>
   {
-    // Use ui_category if available, otherwise use a default group
-    const category = actionMap.ui_category || '';
+    // Try to find a mapping for this action map
+    // 1. Try ui_category (e.g. @ui_CCSpaceFlight)
+    // 2. Try name (e.g. spaceship_movement)
+    // 3. Default to 'Uncategorized'
 
-    if (!categoryGroups.has(category))
+    let categoryKey = actionMap.ui_category;
+    if (!categoryFriendlyNames[categoryKey])
     {
-      categoryGroups.set(category, []);
+      categoryKey = actionMap.name;
     }
-    categoryGroups.get(category).push(actionMap);
+
+    let mappedCategory = categoryFriendlyNames[categoryKey];
+
+    // If mappedCategory is an array, take the first element as the main category
+    let mainCategory = 'Uncategorized';
+
+    if (Array.isArray(mappedCategory))
+    {
+      mainCategory = mappedCategory[0];
+    } else if (typeof mappedCategory === 'string')
+    {
+      mainCategory = mappedCategory;
+    } else
+    {
+      // Fallback if not found in mapping
+      if (actionMap.ui_category)
+      {
+        mainCategory = actionMap.ui_category;
+      } else
+      {
+        mainCategory = 'Uncategorized';
+      }
+    }
+
+    // Normalize category name (capitalize)
+    if (mainCategory && mainCategory !== 'Uncategorized')
+    {
+      // Capitalize first letter of each word
+      mainCategory = mainCategory.split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      // Special case for "Comms/social" -> "Comms/Social"
+      mainCategory = mainCategory.replace('Comms/social', 'Comms/Social');
+    }
+
+    if (!categoryGroups.has(mainCategory))
+    {
+      categoryGroups.set(mainCategory, []);
+    }
+    categoryGroups.get(mainCategory).push(actionMap);
   });
 
-  // Sort categories alphabetically, but keep empty string at the end
+  // Sort categories
+  // We want a specific order if possible, otherwise alphabetical
+  const categoryOrder = [
+    'Vehicle',
+    'On Foot',
+    'Turrets',
+    'Comms/Social',
+    'Camera',
+    'Other',
+    'Uncategorized'
+  ];
+
   const sortedCategories = Array.from(categoryGroups.keys()).sort((a, b) =>
   {
-    if (a === '') return 1;
-    if (b === '') return -1;
+    const indexA = categoryOrder.indexOf(a);
+    const indexB = categoryOrder.indexOf(b);
+
+    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+    if (indexA !== -1) return -1;
+    if (indexB !== -1) return 1;
+
     return a.localeCompare(b);
   });
 
@@ -1829,24 +2158,25 @@ function renderCategories()
   {
     const actionMaps = categoryGroups.get(categoryName);
 
-    // Get friendly name from mapping, fallback to original category name
-    const friendlyName = categoryFriendlyNames[categoryName] || categoryName || 'Uncategorized';
-
-    // Add category header if we have multiple action maps in this category
-    if (actionMaps.length > 1)
+    // Sort action maps within category by display name
+    actionMaps.sort((a, b) =>
     {
-      html += `<div class="category-header">${friendlyName}</div>`;
-    }
+      const nameA = a.ui_label || a.display_name || a.name;
+      const nameB = b.ui_label || b.display_name || b.name;
+      return nameA.localeCompare(nameB);
+    });
+
+    // Add category header
+    html += `<div class="category-header">${categoryName}</div>`;
 
     // Add action maps under this category
     actionMaps.forEach(actionMap =>
     {
       const displayName = actionMap.ui_label || actionMap.display_name || actionMap.name;
       const isActive = currentCategory === actionMap.name;
-      const indent = actionMaps.length > 1 ? 'category-item-indented' : '';
 
       html += `
-        <div class="category-item ${isActive ? 'active' : ''} ${indent}" 
+        <div class="category-item ${isActive ? 'active' : ''} category-item-indented" 
              data-category="${actionMap.name}">
           ${displayName}
         </div>
@@ -1912,24 +2242,32 @@ function renderDeviceInfo()
 // Helper function to check if an action has any bindings that will be displayed
 function actionHasVisibleBindings(action)
 {
-  if (!action.bindings || action.bindings.length === 0) return true; // Show actions with no bindings (they're unbound)
-
-  // Check if ALL bindings are empty/space-only defaults
-  const allBindingsAreEmptyDefaults = action.bindings.every(binding =>
+  // Check if it's effectively unbound (no bindings or only empty defaults that are placeholders)
+  const isEffectivelyUnbound = !action.bindings || action.bindings.length === 0 || action.bindings.every(binding =>
   {
-    // Check the pattern BEFORE trimming to catch 'kb1_ ', 'js1_ ', etc.
-    const isEmptyBinding = !!binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
-    return binding.is_default && isEmptyBinding;
+    // Check the pattern BEFORE trimming to catch 'kb_ ', 'js_ ', etc.
+    // The digit after the device prefix is optional
+    const isEmptyBinding = !!binding.input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
+    // It's only "effectively unbound" if it's the special Unbound placeholder
+    const isUnboundPlaceholder = binding.is_default && isEmptyBinding && binding.display_name === 'Unbound';
+
+    return isUnboundPlaceholder;
   });
 
-  // Always show actions that have only empty defaults (unbound by default actions)
-  // These are actions users might want to bind themselves
-  // BUT respect the input type filter
-  if (allBindingsAreEmptyDefaults)
+  if (isEffectivelyUnbound)
   {
+    // If we are hiding unbound actions, return false
+    if (!showUnboundActions) return false;
+
+    // If customizedOnly is true, unbound actions (which are defaults) should be hidden
+    if (customizedOnly) return false;
+
     // If filtering by input type, check if there's at least one empty binding of that type
+    // This logic is a bit fuzzy for "unbound", but preserves existing behavior
     if (currentFilter !== 'all')
     {
+      if (!action.bindings) return true; // If no bindings at all, show it (it's a candidate for any type)
+
       return action.bindings.some(binding =>
       {
         if (currentFilter === 'keyboard') return binding.input_type === 'Keyboard';
@@ -1942,18 +2280,24 @@ function actionHasVisibleBindings(action)
     return true;
   }
 
+  // If we have bindings, check if any are visible
   return action.bindings.some(binding =>
   {
     const trimmedInput = binding.input.trim();
 
     // Check if this is a cleared binding (check BEFORE trimming for the pattern)
-    const isClearedBinding = !!binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
+    const isClearedBinding = !!binding.input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
 
-    // Skip truly unbound bindings, but keep cleared bindings that override defaults
-    if (!trimmedInput || trimmedInput === '') return false;
+    // Skip truly unbound bindings (placeholders), but keep cleared bindings that override defaults
+    // We use the same strict check for placeholders here
+    const isUnboundPlaceholder = binding.is_default && isClearedBinding && binding.display_name === 'Unbound';
+    if (isUnboundPlaceholder) return false;
 
-    // Filter out default bindings if showDefaultBindings is false
-    if (!showDefaultBindings && binding.is_default && !isClearedBinding) return false;
+    // Also skip if input is empty and it's NOT a cleared binding (just in case)
+    if ((!trimmedInput || trimmedInput === '') && !isClearedBinding) return false;
+
+    // If customizedOnly is true, hide default bindings (unless it's a cleared binding)
+    if (customizedOnly && binding.is_default && !isClearedBinding) return false;
 
     // Filter display based on current filter
     if (currentFilter !== 'all')
@@ -2140,7 +2484,7 @@ function renderKeybindings()
 
       // Check if this action only has the special "unbound" placeholder binding
       const hasOnlyUnboundPlaceholder = action.bindings && action.bindings.length === 1 &&
-        action.bindings[0].input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+        action.bindings[0].input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/) &&
         action.bindings[0].is_default &&
         action.bindings[0].display_name === 'Unbound';
 
@@ -2155,19 +2499,19 @@ function renderKeybindings()
           const trimmedInput = binding.input.trim();
 
           // Skip the unbound placeholder binding if it exists alongside real bindings
-          const isUnboundPlaceholder = binding.input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+          const isUnboundPlaceholder = binding.input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/) &&
             binding.is_default &&
             binding.display_name === 'Unbound';
           if (isUnboundPlaceholder) return;
 
           // Check if this is a cleared binding (overriding a default with blank)
-          const isClearedBinding = !!trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) && binding.is_default;
+          const isClearedBinding = !!trimmedInput.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/) && binding.is_default;
 
           // Skip truly unbound bindings
           if (!trimmedInput || trimmedInput === '') return;
 
-          // Filter out default bindings if showDefaultBindings is false
-          if (!showDefaultBindings && binding.is_default && !isClearedBinding) return;
+          // If customizedOnly is true, hide default bindings (unless it's a cleared binding)
+          if (customizedOnly && binding.is_default && !isClearedBinding) return;
 
           // Filter display based on current filter
           if (currentFilter !== 'all')
@@ -2284,6 +2628,66 @@ function renderKeybindings()
       await removeBinding(actionMap, actionName, input);
     });
   });
+
+  // Setup scroll listener for sticky header category tracking
+  setupScrollCategoryTracker();
+}
+
+/**
+ * Setup scroll listener to track which category header is visible
+ * Updates the profile-name header with the current visible category
+ */
+function setupScrollCategoryTracker()
+{
+  const scrollContainer = document.getElementById('action-maps-container');
+  if (!scrollContainer) return;
+
+  // Remove any existing listener to avoid duplicates
+  if (window.categoryTrackerScrollListener)
+  {
+    scrollContainer.removeEventListener('scroll', window.categoryTrackerScrollListener);
+  }
+
+  window.categoryTrackerScrollListener = () =>
+  {
+    const profileNameEl = document.getElementById('profile-name');
+    if (!profileNameEl) return;
+
+    // Get all action map headers (use the correct class)
+    const headers = document.querySelectorAll('.action-map-header');
+    if (headers.length === 0) return;
+
+    let lastVisibleCategory = null;
+    const scrollTop = scrollContainer.scrollTop;
+
+    // Iterate through headers to find the last one that's above the scroll position
+    headers.forEach((header) =>
+    {
+      const headerTop = header.offsetTop - scrollContainer.offsetTop;
+      const h3 = header.querySelector('h3');
+      const headerText = h3 ? h3.textContent.trim() : null;
+
+      if (!headerText) return;
+
+      // Check if header is above current scroll position + small threshold
+      if (headerTop <= scrollTop + 10)
+      {
+        lastVisibleCategory = headerText;
+      }
+    });
+
+    // Update the profile name if we found a category
+    if (lastVisibleCategory && profileNameEl.textContent !== lastVisibleCategory)
+    {
+      profileNameEl.textContent = lastVisibleCategory;
+    } else if (!lastVisibleCategory && profileNameEl.textContent !== 'Keybindings')
+    {
+      // Reset to default if no category is visible
+      profileNameEl.textContent = 'Keybindings';
+    }
+  };
+
+  scrollContainer.addEventListener('scroll', window.categoryTrackerScrollListener);
 }
 
 // Toggle action map visibility
@@ -2735,8 +3139,8 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
     {
       console.log('INPUT DETECTED (raw):', result.display_name, result.input_string);
 
-      // Apply joystick mapping if applicable
-      const mappedInput = applyJoystickMapping(result.input_string);
+      // Apply joystick mapping if applicable (pass the full result object for device UUID)
+      const mappedInput = applyJoystickMapping(result.input_string, result.device_uuid);
 
       if (mappedInput === null)
       {
@@ -3586,7 +3990,7 @@ async function detectDevice(targetDevice)
       if (infoDiv)
       {
         infoDiv.classList.remove('detecting');
-        infoDiv.innerHTML = '<div style="color: #d9534f;">⏱️ Timeout - no input detected. Try again.</div>';
+        infoDiv.innerHTML = '<div style="color: #ef4444;">⏱️ Timeout - no input detected. Try again.</div>';
 
         setTimeout(() =>
         {
@@ -3601,7 +4005,7 @@ async function detectDevice(targetDevice)
     await showAlert(`Error loading keybindings: ${error}`, 'Error');
     {
       infoDiv.classList.remove('detecting');
-      infoDiv.innerHTML = `<div style="color: #d9534f;">❌ Error: ${error.message || error}</div>`;
+      infoDiv.innerHTML = `<div style="color: #ef4444;">❌ Error: ${error.message || error}</div>`;
 
       setTimeout(() =>
       {
@@ -3714,10 +4118,8 @@ function saveJoystickMapping()
 }
 
 // Function to apply joystick mapping to detected input
-function applyJoystickMapping(detectedInput)
+function applyJoystickMapping(detectedInput, deviceUuid = null)
 {
-  const mappings = JSON.parse(localStorage.getItem('joystickMapping') || '{}');
-
   // Extract the prefix and number from the detected input (e.g., "js3_button1" -> js, 3)
   const match = detectedInput.match(/^(js|gp)(\d+)_/);
   if (!match)
@@ -3727,6 +4129,28 @@ function applyJoystickMapping(detectedInput)
 
   const detectedPrefix = match[1];
   const detectedNum = parseInt(match[2]);
+  const autoDetectedId = `${detectedPrefix}${detectedNum}`;
+
+  // PRIORITY 1: Check device-manager prefix overrides (if available)
+  if (deviceUuid && window.applyDevicePrefixOverride)
+  {
+    try
+    {
+      const overrideMappedInput = window.applyDevicePrefixOverride(detectedInput, deviceUuid);
+      if (overrideMappedInput !== detectedInput)
+      {
+        console.log(`[MAIN] Applied prefix override: ${detectedInput} -> ${overrideMappedInput}`);
+        return overrideMappedInput;
+      }
+    }
+    catch (e)
+    {
+      console.warn('[MAIN] Error applying prefix override:', e);
+    }
+  }
+
+  // PRIORITY 2: Check legacy joystick mapping system (old device mapping modal)
+  const mappings = JSON.parse(localStorage.getItem('joystickMapping') || '{}');
 
   // Find which target device (js1, js2, gp1) maps to this detected device
   for (const [targetDevice, mapping] of Object.entries(mappings))
@@ -3735,13 +4159,13 @@ function applyJoystickMapping(detectedInput)
     {
       // Found a mapping - replace the device prefix and number
       const mappedInput = detectedInput.replace(/^(js|gp)\d+_/, `${targetDevice}_`);
-      console.log(`Applied joystick mapping: ${detectedInput} -> ${mappedInput}`);
+      console.log(`[LEGACY] Applied joystick mapping: ${detectedInput} -> ${mappedInput}`);
       return mappedInput;
     }
   }
 
   // No mapping found, return as-is
-  console.log(`No mapping found for ${detectedInput}, using as-is`);
+  console.log(`No mapping found for ${detectedInput}, using auto-detected ID: ${autoDetectedId}`);
   return detectedInput;
 }
 
@@ -4267,7 +4691,7 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
 
   // Check if this action only has the special "unbound" placeholder
   const hasOnlyUnboundPlaceholder = action.bindings && action.bindings.length === 1 &&
-    action.bindings[0].input.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/) &&
+    action.bindings[0].input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/) &&
     action.bindings[0].is_default &&
     action.bindings[0].display_name === 'Unbound';
 
@@ -4285,7 +4709,7 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
       if (!trimmedInput || trimmedInput === '') return;
 
       // Check if this is a cleared binding (e.g., "js1_ ", "kb1_ ", etc.)
-      const isClearedBinding = trimmedInput.match(/^(js\d+|kb\d+|mouse\d+|gp\d+)_\s*$/);
+      const isClearedBinding = trimmedInput.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
 
       let icon = '○';
       if (binding.input_type === 'Keyboard') icon = '⌨️';
@@ -4557,7 +4981,7 @@ async function generateUnbindProfile()
     {
       statusDiv.style.display = 'block';
       statusDiv.style.color = 'var(--accent-warning)';
-      statusDiv.textContent = '⚠️ No SC installation directory configured. Configure it in Auto Save Settings first.';
+      statusDiv.textContent = '⚠️ No SC installation directory configured. Go to Settings to configure it.';
       return;
     }
 
@@ -4669,3 +5093,70 @@ async function removeUnbindFiles()
 // Make functions globally available
 window.closeClearSCBindsModal = closeClearSCBindsModal;
 window.closeClearSCBindsSuccessModal = closeClearSCBindsSuccessModal;
+
+// ============================================================================
+// AUTO-SAVE MODAL FUNCTIONS
+// ============================================================================
+
+async function openAutoSaveModal()
+{
+  const modal = document.getElementById('auto-save-modal');
+  const scNotConfigured = document.getElementById('auto-save-sc-not-configured');
+  const scConfigured = document.getElementById('auto-save-sc-configured');
+  const autoSaveCheckbox = document.getElementById('auto-save-all-checkbox');
+  const installationsList = document.getElementById('auto-save-installations-list');
+
+  const scInstallPath = localStorage.getItem('scInstallDirectory');
+
+  if (!scInstallPath)
+  {
+    // Show "not configured" message with button to go to settings
+    scNotConfigured.style.display = 'block';
+    scConfigured.style.display = 'none';
+  }
+  else
+  {
+    // Show auto-save options
+    scNotConfigured.style.display = 'none';
+    scConfigured.style.display = 'block';
+
+    // Load checkbox state
+    const autoSaveEnabled = localStorage.getItem('autoSaveToAllInstallations') === 'true';
+    autoSaveCheckbox.checked = autoSaveEnabled;
+
+    // Scan and display installations
+    try
+    {
+      installationsList.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.9rem;">Scanning...</div>';
+      const installations = await invoke('scan_sc_installations', { basePath: scInstallPath });
+
+      if (installations.length === 0)
+      {
+        installationsList.innerHTML = '<div style="color: var(--text-secondary); font-style: italic;">No installations found</div>';
+      }
+      else
+      {
+        installationsList.innerHTML = installations.map(inst =>
+          `<div style="padding: 0.25rem 0;">🚀 ${inst.name}</div>`
+        ).join('');
+      }
+    }
+    catch (error)
+    {
+      console.error('Error scanning installations:', error);
+      installationsList.innerHTML = `<div style="color: #ff6464;">Error: ${error}</div>`;
+    }
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closeAutoSaveModal()
+{
+  const modal = document.getElementById('auto-save-modal');
+  modal.style.display = 'none';
+}
+
+// Make functions globally available
+window.openAutoSaveModal = openAutoSaveModal;
+window.closeAutoSaveModal = closeAutoSaveModal;

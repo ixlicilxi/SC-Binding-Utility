@@ -69,15 +69,94 @@ function getCurrentJoystickNumber()
 {
     if (!currentTemplate) return 1;
 
-    // New pages structure
+    // New pages structure with devicePrefix (v1.1+)
     if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
     {
-        return currentTemplate.pages[currentPageIndex].joystickNumber || 1;
+        const page = currentTemplate.pages[currentPageIndex];
+
+        // Extract number from device_prefix (snake_case) or devicePrefix (camelCase)
+        const prefix = page.device_prefix || page.devicePrefix;
+        if (prefix)
+        {
+            const match = prefix.match(/\d+/);
+            if (match)
+            {
+                return parseInt(match[0], 10);
+            }
+        }
+
+        // Fallback to old joystickNumber field
+        return page.joystickNumber || 1;
     }
 
     // Fallback for legacy structure
     const currentStickData = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
-    return (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
+
+    if (currentStickData)
+    {
+        // Check for device_prefix or devicePrefix first
+        const prefix = currentStickData.device_prefix || currentStickData.devicePrefix;
+        if (prefix)
+        {
+            const match = prefix.match(/\d+/);
+            if (match)
+            {
+                return parseInt(match[0], 10);
+            }
+        }
+
+        // Fallback to joystickNumber
+        if (currentStickData.joystickNumber)
+        {
+            return currentStickData.joystickNumber;
+        }
+    }
+
+    return currentTemplate.joystickNumber || 1;
+}
+
+/**
+ * Get the device prefix for the current page (e.g., "js1", "js2", "gp1")
+ * Returns the full prefix string to prepend to button/axis names
+ */
+function getCurrentDevicePrefix()
+{
+    if (!currentTemplate) return 'js1';
+
+    // New pages structure with devicePrefix (v1.1+)
+    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    {
+        const page = currentTemplate.pages[currentPageIndex];
+
+        // Use device_prefix (snake_case) or devicePrefix (camelCase) if available
+        const prefix = page.device_prefix || page.devicePrefix;
+        if (prefix)
+        {
+            return prefix;
+        }
+
+        // Fallback to constructing from joystickNumber
+        const jsNum = page.joystickNumber || 1;
+        return `js${jsNum}`;
+    }
+
+    // Fallback for legacy structure
+    const currentStickData = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
+
+    if (currentStickData)
+    {
+        const prefix = currentStickData.device_prefix || currentStickData.devicePrefix;
+        if (prefix)
+        {
+            return prefix;
+        }
+
+        const jsNum = currentStickData.joystickNumber || 1;
+        return `js${jsNum}`;
+    }
+
+    const jsNum = currentTemplate.joystickNumber || 1;
+    return `js${jsNum}`;
 }
 
 function normalizeInputStringForStick(rawInput, jsPrefix)
@@ -169,6 +248,16 @@ window.initializeVisualView = function ()
 
     // Set up resize listener
     window.addEventListener('resize', resizeViewerCanvas);
+
+    // Listen for theme changes to refresh canvas
+    document.addEventListener('themechange', () =>
+    {
+        console.log('Theme changed, refreshing canvas...');
+        if (currentTemplate && window.viewerImage)
+        {
+            resizeViewerCanvas();
+        }
+    });
 
     // Listen for page visibility changes to refresh bindings when returning
     document.addEventListener('visibilitychange', async () =>
@@ -349,20 +438,21 @@ async function onTemplateFileSelected(e)
 
         currentTemplate = templateData;
 
-        // Persist to localStorage
-        ViewerState.saveTemplate(templateData, file.name);
+        // Persist to localStorage using viewer-specific keys
+        ViewerState.save('viewerCurrentTemplate', templateData);
+        localStorage.setItem('viewerTemplateFileName', file.name);
 
-        // Update header template name
+        // Update header template name using viewer-specific function
         console.log('onTemplateFileSelected - templateData.name:', templateData.name);
-        console.log('window.updateTemplateIndicator exists:', typeof window.updateTemplateIndicator);
-        if (window.updateTemplateIndicator)
+        console.log('window.updateViewerTemplateIndicator exists:', typeof window.updateViewerTemplateIndicator);
+        if (window.updateViewerTemplateIndicator)
         {
-            console.log('Calling updateTemplateIndicator with:', templateData.name, file.name);
-            window.updateTemplateIndicator(templateData.name, file.name);
+            console.log('Calling updateViewerTemplateIndicator with:', templateData.name, file.name);
+            window.updateViewerTemplateIndicator(templateData.name, file.name);
         }
         else
         {
-            console.log('window.updateTemplateIndicator is not available');
+            console.log('window.updateViewerTemplateIndicator is not available');
         }
 
         displayTemplate();
@@ -381,23 +471,23 @@ function restoreViewState()
 {
     try
     {
-        // Restore current page index
+        // Restore current page index (use viewer-specific key)
         const savedPageIndex = localStorage.getItem('viewerCurrentPageIndex');
         if (savedPageIndex !== null)
         {
             currentPageIndex = parseInt(savedPageIndex, 10) || 0;
         }
 
-        // Restore hide defaults preference
-        const savedHideDefaults = localStorage.getItem('hideDefaultBindings');
+        // Restore hide defaults preference (use viewer-specific key)
+        const savedHideDefaults = localStorage.getItem('viewerHideDefaultBindings');
         if (savedHideDefaults !== null)
         {
             hideDefaultBindings = savedHideDefaults === 'true';
             updateHideDefaultsButton();
         }
 
-        // Restore modifier filter preference
-        const savedModifierFilter = localStorage.getItem('modifierFilter');
+        // Restore modifier filter preference (use viewer-specific key)
+        const savedModifierFilter = localStorage.getItem('viewerModifierFilter');
         if (savedModifierFilter)
         {
             modifierFilter = savedModifierFilter;
@@ -408,7 +498,7 @@ function restoreViewState()
             }
         }
 
-        // Restore pan and zoom using ViewerState helper
+        // Restore pan and zoom using ViewerState helper (use viewer-specific key)
         const savedPan = ViewerState.load('viewerPan');
         const savedZoom = localStorage.getItem('viewerZoom');
 
@@ -475,7 +565,8 @@ function loadPersistedTemplate()
 {
     try
     {
-        const savedTemplate = ViewerState.load('currentTemplate');
+        // Use separate localStorage keys for visual viewer to avoid coupling with template editor
+        const savedTemplate = ViewerState.load('viewerCurrentTemplate');
         if (savedTemplate)
         {
             currentTemplate = normalizeTemplateData(savedTemplate);
@@ -496,11 +587,11 @@ function loadPersistedTemplate()
                 currentPageIndex = 0;
             }
 
-            // Update header template name
-            const savedFileName = localStorage.getItem('templateFileName');
-            if (window.updateTemplateIndicator)
+            // Update header template name using viewer-specific indicator function
+            const savedFileName = localStorage.getItem('viewerTemplateFileName');
+            if (window.updateViewerTemplateIndicator)
             {
-                window.updateTemplateIndicator(currentTemplate.name, savedFileName);
+                window.updateViewerTemplateIndicator(currentTemplate.name, savedFileName);
             }
 
             displayTemplate();
@@ -815,7 +906,8 @@ function resizeViewerCanvas()
     // Draw highlight border around selected box if any
     if (selectedBox)
     {
-        ctx.strokeStyle = '#7dd3c0';
+        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+        ctx.strokeStyle = accentPrimary;
         ctx.lineWidth = 3;
         ctx.setLineDash([5, 5]);
         roundRect(ctx, selectedBox.x - 3, selectedBox.y - 3, selectedBox.width + 6, selectedBox.height + 6, 6);
@@ -849,6 +941,17 @@ function drawButtons(img, mode = DrawMode.NORMAL)
     }
 
     const buttons = getCurrentButtons();
+
+    // First pass: draw all connecting lines
+    buttons.forEach(button =>
+    {
+        if (button.labelPos)
+        {
+            drawConnectingLineForButton(button, mode);
+        }
+    });
+
+    // Second pass: draw all buttons/markers/boxes
     buttons.forEach(button =>
     {
         // Check if this is a 4-way hat
@@ -861,6 +964,21 @@ function drawButtons(img, mode = DrawMode.NORMAL)
             drawSingleButton(button, mode);
         }
     });
+}
+
+// Helper function to draw connecting line for a button (first pass)
+function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
+{
+    if (mode === DrawMode.BOUNDS_ONLY) return; // Skip lines in bounds-only mode
+
+    const isHat = button.buttonType === 'hat4way';
+    const bindings = isHat ? findAllBindingsForHatDirection(button, 'up') : findAllBindingsForButton(button);
+
+    const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
+    const lineColor = bindings.length > 0 ? accentPrimary : textMuted;
+
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, ButtonFrameWidth / 2, lineColor, isHat);
 }
 
 function drawSingleButton(button, mode = DrawMode.NORMAL)
@@ -882,12 +1000,8 @@ function drawSingleButton(button, mode = DrawMode.NORMAL)
         return;
     }
 
-    // Draw line connecting button to label
-    if (button.labelPos)
-    {
-        const lineColor = bindings.length > 0 ? '#d9534f' : '#666';
-        drawConnectingLine(ctx, button.buttonPos, button.labelPos, ButtonFrameWidth / 2, lineColor, false);
-    }
+    // Note: Lines are now drawn in a separate pass (drawConnectingLineForButton)
+    // This ensures button frames are always drawn on top of lines
 
     // Draw button position marker
     drawButtonMarker(ctx, button.buttonPos, 1, bindings.length > 0, false);
@@ -939,12 +1053,8 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
     // Draw center point marker
     drawButtonMarker(ctx, hat.buttonPos, 1, false, true);
 
-    // Draw line to label area
-    if (hat.labelPos)
-    {
-        const lineColor = '#666';
-        drawConnectingLine(ctx, hat.buttonPos, hat.labelPos, HatFrameWidth / 2, lineColor, true); // true = isHat
-    }
+    // Note: Hat connecting line is now drawn in drawConnectingLineForButton (first pass)
+    // This ensures button frames are always drawn on top of lines
 
     // Callback to register clickable boxes
     const onClickableBox = (box) =>
@@ -1070,7 +1180,8 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
 function extractButtonIdentifier(button, direction = null)
 {
     const jsNum = getCurrentJoystickNumber();
-    const jsPrefix = `js${jsNum}_`;
+    const devicePrefix = getCurrentDevicePrefix();
+    const jsPrefix = `${devicePrefix}_`;
 
     let buttonNum = null;
     let inputString = null;
@@ -1082,7 +1193,17 @@ function extractButtonIdentifier(button, direction = null)
 
         if (typeof dirInput === 'string')
         {
-            inputString = normalizeInputStringForStick(dirInput, jsPrefix);
+            // For v1.1+ templates, hat inputs like "hat1_up" need the device prefix prepended
+            // The hat number (1, 2, etc.) refers to the physical input and stays as-is
+            let processedInput = dirInput;
+
+            // Prepend devicePrefix if no underscore prefix already (plain button name or hat input)
+            if (!processedInput.match(/^(js|gp)\d+_/i))
+            {
+                processedInput = `${devicePrefix}_${processedInput}`;
+            }
+
+            inputString = normalizeInputStringForStick(processedInput, jsPrefix);
         }
         else if (typeof dirInput === 'object' && dirInput.id !== undefined)
         {
@@ -1109,7 +1230,7 @@ function extractButtonIdentifier(button, direction = null)
             if (main.type === 'axis')
             {
                 const directionSuffix = main.direction ? `_${main.direction}` : '';
-                const axisString = `js${jsNum}_axis${main.id}${directionSuffix}`;
+                const axisString = `${devicePrefix}_axis${main.id}${directionSuffix}`;
                 inputString = normalizeInputStringForStick(axisString, jsPrefix);
             }
             else
@@ -1118,6 +1239,11 @@ function extractButtonIdentifier(button, direction = null)
             }
         }
         else if (typeof main === 'string')
+        {
+            // For v1.1+ templates, buttons don't have prefixes, so we prepend the devicePrefix
+            const withPrefix = main.includes('_') ? main : `${devicePrefix}_${main}`;
+            inputString = normalizeInputStringForStick(withPrefix, jsPrefix);
+        }
         {
             inputString = normalizeInputStringForStick(main, jsPrefix);
         }
@@ -1128,13 +1254,13 @@ function extractButtonIdentifier(button, direction = null)
         if (typeof button.inputId === 'string' && button.inputId.match(/^(x|y|z|rotx|roty|rotz|slider)$/i))
         {
             // Already a Star Citizen axis name
-            inputString = normalizeInputStringForStick(`js${jsNum}_${button.inputId.toLowerCase()}`, jsPrefix);
+            inputString = normalizeInputStringForStick(`${devicePrefix}_${button.inputId.toLowerCase()}`, jsPrefix);
         }
         else
         {
             // Legacy numeric format
             const directionSuffix = button.axisDirection ? `_${button.axisDirection}` : '';
-            const axisString = `js${jsNum}_axis${button.inputId}${directionSuffix}`;
+            const axisString = `${devicePrefix}_axis${button.inputId}${directionSuffix}`;
             inputString = normalizeInputStringForStick(axisString, jsPrefix);
         }
     }
@@ -1600,8 +1726,8 @@ const ViewerState = {
         this.save('viewerPan', pan);
         localStorage.setItem('viewerZoom', zoom.toString());
         localStorage.setItem('viewerCurrentPageIndex', currentPageIndex.toString());
-        localStorage.setItem('hideDefaultBindings', hideDefaultBindings.toString());
-        localStorage.setItem('modifierFilter', modifierFilter);
+        localStorage.setItem('viewerHideDefaultBindings', hideDefaultBindings.toString());
+        localStorage.setItem('viewerModifierFilter', modifierFilter);
     }
 };
 
@@ -1615,7 +1741,19 @@ window.findButtonNameForInput = function (inputString)
     // Helper to check match
     const checkMatch = (button, jsNum, direction = null) =>
     {
-        const jsPrefix = `js${jsNum}_`;
+        // Get device prefix - try to get from page structure
+        let devicePrefix = 'js1';
+        if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+        {
+            const page = currentTemplate.pages[currentPageIndex];
+            devicePrefix = page.device_prefix || page.devicePrefix || `js${page.joystickNumber || jsNum}`;
+        }
+        else
+        {
+            devicePrefix = `js${jsNum}`;
+        }
+
+        const jsPrefix = `${devicePrefix}_`;
 
         // Logic adapted from extractButtonIdentifier but using passed jsNum
         let buttonNum = null;
@@ -1626,7 +1764,9 @@ window.findButtonNameForInput = function (inputString)
             const dirInput = button.inputs[direction];
             if (typeof dirInput === 'string')
             {
-                calculatedInputString = normalizeInputStringForStick(dirInput, jsPrefix);
+                // For v1.1+ templates, prepend devicePrefix if not already present
+                const withPrefix = dirInput.includes('_') ? dirInput : `${devicePrefix}_${dirInput}`;
+                calculatedInputString = normalizeInputStringForStick(withPrefix, jsPrefix);
             }
             else if (typeof dirInput === 'object' && dirInput.id !== undefined)
             {
@@ -1647,7 +1787,7 @@ window.findButtonNameForInput = function (inputString)
                     if (main.type === 'axis')
                     {
                         const directionSuffix = main.direction ? `_${main.direction}` : '';
-                        const axisString = `js${jsNum}_axis${main.id}${directionSuffix}`;
+                        const axisString = `${devicePrefix}_axis${main.id}${directionSuffix}`;
                         calculatedInputString = normalizeInputStringForStick(axisString, jsPrefix);
                     }
                     else
@@ -1657,19 +1797,21 @@ window.findButtonNameForInput = function (inputString)
                 }
                 else if (typeof main === 'string')
                 {
-                    calculatedInputString = normalizeInputStringForStick(main, jsPrefix);
+                    // For v1.1+ templates, prepend devicePrefix if not already present
+                    const withPrefix = main.includes('_') ? main : `${devicePrefix}_${main}`;
+                    calculatedInputString = normalizeInputStringForStick(withPrefix, jsPrefix);
                 }
             }
             else if (button.inputType === 'axis' && button.inputId !== undefined && button.inputId !== null)
             {
                 if (typeof button.inputId === 'string' && button.inputId.match(/^(x|y|z|rotx|roty|rotz|slider)$/i))
                 {
-                    calculatedInputString = normalizeInputStringForStick(`js${jsNum}_${button.inputId.toLowerCase()}`, jsPrefix);
+                    calculatedInputString = normalizeInputStringForStick(`${devicePrefix}_${button.inputId.toLowerCase()}`, jsPrefix);
                 }
                 else
                 {
                     const directionSuffix = button.axisDirection ? `_${button.axisDirection}` : '';
-                    const axisString = `js${jsNum}_axis${button.inputId}${directionSuffix}`;
+                    const axisString = `${devicePrefix}_axis${button.inputId}${directionSuffix}`;
                     calculatedInputString = normalizeInputStringForStick(axisString, jsPrefix);
                 }
             }
@@ -1793,7 +1935,7 @@ async function exportToImage()
         const exportCtx = exportCanvas.getContext('2d');
 
         // Dark background matching canvas theme
-        exportCtx.fillStyle = '#0c0f11';
+        exportCtx.fillStyle = '#09090b';
         exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
         exportCtx.scale(dpr, dpr);

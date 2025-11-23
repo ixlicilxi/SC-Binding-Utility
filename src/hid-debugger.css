@@ -11,13 +11,72 @@
     max-width: none;
 }
 
+/* Header with Back Button */
+.hid-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 20px 30px;
+    background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium-light) 100%);
+    border-bottom: 2px solid var(--accent-primary);
+    margin-bottom: 30px;
+}
+
+.btn-back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: var(--accent-subtle);
+    border: 1px solid var(--accent-primary);
+    border-radius: 6px;
+    color: var(--accent-primary);
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 100px;
+}
+
+.btn-back:hover {
+    background: var(--accent-primary);
+    color: var(--text-inverse);
+    transform: translateX(-2px);
+}
+
+.btn-back .back-arrow {
+    font-size: 1.4em;
+    line-height: 1;
+    transition: transform 0.2s ease;
+}
+
+.btn-back:hover .back-arrow {
+    transform: translateX(-3px);
+}
+
+.header-content {
+    flex: 1;
+}
+
+.header-content h1 {
+    margin: 0 0 8px 0;
+    font-size: 1.8em;
+    color: var(--text-primary);
+}
+
+.header-content p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 1em;
+}
+
 .debugger-controls {
     display: flex;
     gap: 10px;
     align-items: center;
     margin-bottom: 20px;
     padding: 15px;
-    background: var(--bg-dark);
+    background: var(--bg-medium);
     border-radius: 8px;
 }
 
@@ -26,12 +85,12 @@
     padding: 8px 16px;
     border-radius: 4px;
     font-weight: 600;
-    background: #444;
-    color: #fff;
+    background: var(--bg-light);
+    color: var(--text-primary);
 }
 
 .status-indicator.polling {
-    background: #5cb85c;
+    background: var(--status-success);
     animation: pulse 2s ease-in-out infinite;
 }
 
@@ -49,7 +108,7 @@
 
 /* Device Info Panel */
 .device-info-panel {
-    background: #2a2a2a;
+    background: var(--bg-medium-light);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
@@ -58,20 +117,20 @@
 .device-info-panel h2 {
     margin-top: 0;
     margin-bottom: 15px;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .no-device-selected {
     padding: 20px;
     text-align: center;
-    color: #888;
+    color: var(--text-muted);
     font-style: italic;
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 4px;
 }
 
 .device-info-content {
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 6px;
     padding: 20px;
 }
@@ -91,28 +150,28 @@
 
 .device-info-label {
     font-size: 0.85em;
-    color: #888;
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
 .device-info-value {
     font-size: 1.1em;
-    color: #fff;
+    color: var(--text-primary);
     font-weight: 600;
 }
 
 .device-info-value code {
-    background: rgba(78, 201, 176, 0.12);
+    background: var(--accent-subtle);
     padding: 4px 8px;
     border-radius: 4px;
-    color: #4ec9b0;
+    color: var(--accent-primary);
     font-family: 'Courier New', monospace;
 }
 
 /* Live Axis Data Panel */
 .live-data-panel {
-    background: #2a2a2a;
+    background: var(--bg-medium-light);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
@@ -121,7 +180,7 @@
 .live-data-panel h2 {
     margin-top: 0;
     margin-bottom: 15px;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .axis-grid {
@@ -133,24 +192,24 @@
 .axis-placeholder {
     padding: 20px;
     text-align: center;
-    color: #888;
+    color: var(--text-muted);
     font-style: italic;
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 4px;
     grid-column: 1 / -1;
 }
 
 .axis-card {
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 6px;
     padding: 15px;
-    border-left: 4px solid #5bc0de;
+    border-left: 4px solid var(--accent-primary);
     transition: all 0.2s ease;
 }
 
 .axis-card.updated {
-    border-left-color: #5cb85c;
-    background: #1f2a1f;
+    border-left-color: var(--status-success);
+    background: var(--accent-subtle);
     animation: highlight 0.5s ease;
 }
 
@@ -158,11 +217,11 @@
 
     0%,
     100% {
-        background: #1a1a1a;
+        background: var(--bg-dark);
     }
 
     50% {
-        background: #1f2a1f;
+        background: var(--accent-subtle);
     }
 }
 
@@ -175,14 +234,14 @@
 
 .axis-name {
     font-weight: bold;
-    color: #5bc0de;
+    color: var(--accent-primary);
     font-size: 1.1em;
 }
 
 .axis-index {
     font-size: 0.85em;
-    color: #888;
-    background: #2a2a2a;
+    color: var(--text-muted);
+    background: var(--bg-medium);
     padding: 2px 8px;
     border-radius: 3px;
 }
@@ -190,13 +249,13 @@
 .axis-value-display {
     font-size: 1.5em;
     font-weight: bold;
-    color: #fff;
+    color: var(--text-primary);
     font-family: 'Courier New', monospace;
     margin-bottom: 10px;
 }
 
 .axis-bar-container {
-    background: #0a0a0a;
+    background: var(--bg-darkest);
     border-radius: 4px;
     height: 20px;
     position: relative;
@@ -205,25 +264,25 @@
 
 .axis-bar {
     height: 100%;
-    background: linear-gradient(90deg, #5cb85c 0%, #4a9d4a 100%);
+    background: linear-gradient(90deg, var(--status-success) 0%, var(--accent-active) 100%);
     transition: width 0.1s ease;
     border-radius: 4px;
 }
 
 .axis-bar.negative {
-    background: linear-gradient(90deg, #d9534f 0%, #c9302c 100%);
+    background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-active) 100%);
 }
 
 .axis-range {
     font-size: 0.75em;
-    color: #666;
+    color: var(--text-muted);
     margin-top: 5px;
     text-align: center;
 }
 
 /* Raw Event Stream */
 .raw-event-panel {
-    background: #2a2a2a;
+    background: var(--bg-medium-light);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
@@ -238,7 +297,7 @@
 
 .panel-header h2 {
     margin: 0;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .panel-options {
@@ -246,7 +305,7 @@
     gap: 20px;
     align-items: center;
     font-size: 0.9em;
-    color: #aaa;
+    color: var(--text-secondary);
 }
 
 .panel-options label {
@@ -257,7 +316,7 @@
 }
 
 .event-stream {
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 4px;
     padding: 15px;
     height: 300px;
@@ -269,16 +328,16 @@
 .event-placeholder {
     padding: 20px;
     text-align: center;
-    color: #666;
+    color: var(--text-muted);
     font-style: italic;
 }
 
 .event-entry {
     padding: 8px;
     margin-bottom: 5px;
-    background: #2a2a2a;
+    background: var(--bg-medium);
     border-radius: 4px;
-    border-left: 3px solid #5bc0de;
+    border-left: 3px solid var(--accent-primary);
     animation: slideIn 0.2s ease-out;
 }
 
@@ -295,37 +354,37 @@
 }
 
 .event-entry.axis-change {
-    border-left-color: #5cb85c;
+    border-left-color: var(--status-success);
 }
 
 .event-entry.button-press {
-    border-left-color: #f0ad4e;
+    border-left-color: var(--status-warning);
 }
 
 .event-timestamp {
-    color: #888;
+    color: var(--text-muted);
     font-size: 0.85em;
     margin-right: 10px;
 }
 
 .event-type {
-    color: #5bc0de;
+    color: var(--accent-primary);
     font-weight: bold;
     margin-right: 10px;
 }
 
 .event-data {
-    color: #ddd;
+    color: var(--text-secondary);
 }
 
 .event-value {
-    color: #4ec9b0;
+    color: var(--accent-primary);
     font-weight: bold;
 }
 
 /* Comparison Panel */
 .comparison-panel {
-    background: #2a2a2a;
+    background: var(--bg-medium-light);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
@@ -334,7 +393,7 @@
 .comparison-panel h2 {
     margin-top: 0;
     margin-bottom: 15px;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .comparison-grid {
@@ -345,7 +404,7 @@
 }
 
 .comparison-column {
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 6px;
     padding: 20px;
 }
@@ -353,7 +412,7 @@
 .comparison-column h3 {
     margin-top: 0;
     margin-bottom: 15px;
-    color: #5bc0de;
+    color: var(--accent-primary);
     font-size: 1.1em;
 }
 
@@ -365,7 +424,7 @@
 
 .axis-list-item {
     padding: 10px;
-    background: #2a2a2a;
+    background: var(--bg-medium);
     border-radius: 4px;
     display: flex;
     justify-content: space-between;
@@ -374,21 +433,21 @@
 
 .axis-list-name {
     font-weight: 600;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .axis-list-value {
     font-family: 'Courier New', monospace;
-    color: #4ec9b0;
+    color: var(--accent-primary);
     font-size: 0.9em;
 }
 
 .missing-axes-alert {
-    background: rgba(217, 83, 79, 0.15);
-    border: 2px solid #d9534f;
+    background: var(--accent-subtle);
+    border: 2px solid var(--accent-primary);
     border-radius: 6px;
     padding: 15px;
-    color: #d9534f;
+    color: var(--accent-primary);
     font-weight: 600;
 }
 
@@ -417,7 +476,7 @@
 }
 
 .modal-content {
-    background: #2a2a2a;
+    background: var(--bg-medium-light);
     border-radius: 8px;
     max-width: 600px;
     width: 90%;
@@ -441,7 +500,7 @@
 
 .modal-header {
     padding: 20px;
-    border-bottom: 1px solid #444;
+    border-bottom: 1px solid var(--bg-lighter);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -449,13 +508,13 @@
 
 .modal-header h2 {
     margin: 0;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .modal-close {
     background: none;
     border: none;
-    color: #888;
+    color: var(--text-muted);
     font-size: 2em;
     cursor: pointer;
     line-height: 1;
@@ -465,7 +524,7 @@
 }
 
 .modal-close:hover {
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .modal-body {
@@ -476,7 +535,7 @@
 
 .modal-footer {
     padding: 15px 20px;
-    border-top: 1px solid #444;
+    border-top: 1px solid var(--bg-lighter);
     display: flex;
     justify-content: flex-end;
     gap: 10px;
@@ -491,21 +550,21 @@
 .loading-spinner {
     text-align: center;
     padding: 40px;
-    color: #888;
+    color: var(--text-muted);
 }
 
 .device-select-card {
-    background: #1a1a1a;
+    background: var(--bg-dark);
     border-radius: 6px;
     padding: 15px;
-    border-left: 4px solid #5bc0de;
+    border-left: 4px solid var(--accent-primary);
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .device-select-card:hover {
-    background: #222;
-    border-left-color: #5cb85c;
+    background: var(--bg-medium);
+    border-left-color: var(--status-success);
 }
 
 .device-select-header {
@@ -517,7 +576,7 @@
 
 .device-select-name {
     font-weight: bold;
-    color: #fff;
+    color: var(--text-primary);
     font-size: 1.1em;
 }
 
@@ -527,18 +586,18 @@
     font-size: 0.85em;
     font-weight: 600;
     text-transform: uppercase;
-    background: #5bc0de;
-    color: #fff;
+    background: var(--accent-primary);
+    color: var(--text-inverse);
 }
 
 .device-select-details {
     font-size: 0.9em;
-    color: #888;
+    color: var(--text-secondary);
 }
 
 .device-select-uuid {
     font-family: 'Courier New', monospace;
     font-size: 0.85em;
-    color: #4ec9b0;
+    color: var(--accent-primary);
     margin-top: 5px;
 }
