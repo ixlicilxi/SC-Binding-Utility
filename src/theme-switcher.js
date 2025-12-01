@@ -1,22 +1,39 @@
 /**
  * Theme Switcher Module
- * Handles switching between different themes (Scifi and VS Code Dark)
+ * Handles switching between different themes (Scifi, VS Code Dark, and Neon)
  */
 
 const THEMES = {
-    Scifi: 'Scifi',
-    VSCODE: 'vscode'
+    SCIFI: 'scifi',
+    VSCODE: 'vscode',
+    NEON: 'neon'
+};
+
+// Theme display configuration
+const THEME_CONFIG = {
+    [THEMES.SCIFI]: {
+        name: 'Scifi',
+        class: null // Default theme, no class needed
+    },
+    [THEMES.VSCODE]: {
+        name: 'Red',
+        class: 'theme-red'
+    },
+    [THEMES.NEON]: {
+        name: 'Neon',
+        class: 'theme-neon'
+    }
 };
 
 const THEME_STORAGE_KEY = 'appTheme';
-const DEFAULT_THEME = THEMES.Scifi;
+const DEFAULT_THEME = THEMES.SCIFI;
 
 class ThemeSwitcher
 {
     constructor()
     {
         this.currentTheme = this.loadTheme();
-        this.switcherBtn = null;
+        this.themeButtons = [];
         this.initializeTheme();
         this.setupEventListeners();
     }
@@ -26,7 +43,18 @@ class ThemeSwitcher
      */
     loadTheme()
     {
-        return localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME;
+        const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+        // Validate saved theme exists in our config
+        if (savedTheme && THEME_CONFIG[savedTheme])
+        {
+            return savedTheme;
+        }
+        // Handle legacy 'Scifi' value
+        if (savedTheme === 'Scifi')
+        {
+            return THEMES.SCIFI;
+        }
+        return DEFAULT_THEME;
     }
 
     /**
@@ -53,53 +81,44 @@ class ThemeSwitcher
         const root = document.documentElement;
 
         // Remove all theme classes
-        root.classList.remove('theme-Scifi', 'theme-red');
-
-        // Apply the selected theme
-        if (theme === THEMES.VSCODE)
+        Object.values(THEME_CONFIG).forEach(config =>
         {
-            root.classList.add('theme-red');
+            if (config.class)
+            {
+                root.classList.remove(config.class);
+            }
+        });
+
+        // Apply the selected theme class (if not default)
+        const themeConfig = THEME_CONFIG[theme];
+        if (themeConfig && themeConfig.class)
+        {
+            root.classList.add(themeConfig.class);
         }
-        // Scifi is default (no class needed)
 
         this.currentTheme = theme;
-        this.updateSwitcherButton();
+        this.updateActiveButton();
 
         // Dispatch theme change event so canvases can refresh
         document.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
     }
 
     /**
-     * Toggle between themes
+     * Update which button shows as active
      */
-    toggleTheme()
+    updateActiveButton()
     {
-        const newTheme = this.currentTheme === THEMES.Scifi ? THEMES.VSCODE : THEMES.Scifi;
-        this.applyTheme(newTheme);
-        this.saveTheme(newTheme);
-    }
-
-    /**
-     * Update the theme switcher button appearance
-     */
-    updateSwitcherButton()
-    {
-        if (!this.switcherBtn) return;
-
-        const icon = this.switcherBtn.querySelector('.theme-switcher-icon');
-        const text = this.switcherBtn.querySelector('.theme-switcher-text');
-
-        if (this.currentTheme === THEMES.VSCODE)
+        this.themeButtons.forEach(btn =>
         {
-            icon.textContent = '🛑';
-            text.textContent = 'Red';
-            this.switcherBtn.title = 'Switch to Scifi theme';
-        } else
-        {
-            icon.textContent = '🤖';
-            text.textContent = 'Scifi';
-            this.switcherBtn.title = 'Switch to Dark red theme';
-        }
+            const btnTheme = btn.dataset.theme;
+            if (btnTheme === this.currentTheme)
+            {
+                btn.classList.add('active');
+            } else
+            {
+                btn.classList.remove('active');
+            }
+        });
     }
 
     /**
@@ -107,13 +126,26 @@ class ThemeSwitcher
      */
     setupEventListeners()
     {
-        this.switcherBtn = document.getElementById('theme-switcher');
+        const container = document.getElementById('theme-switcher');
+        if (!container) return;
 
-        if (this.switcherBtn)
+        this.themeButtons = container.querySelectorAll('.theme-btn');
+
+        this.themeButtons.forEach(btn =>
         {
-            this.switcherBtn.addEventListener('click', () => this.toggleTheme());
-            this.updateSwitcherButton();
-        }
+            btn.addEventListener('click', () =>
+            {
+                const theme = btn.dataset.theme;
+                if (theme && THEME_CONFIG[theme])
+                {
+                    this.applyTheme(theme);
+                    this.saveTheme(theme);
+                }
+            });
+        });
+
+        // Set initial active state
+        this.updateActiveButton();
     }
 
     /**
@@ -130,6 +162,18 @@ class ThemeSwitcher
     getAvailableThemes()
     {
         return Object.values(THEMES);
+    }
+
+    /**
+     * Set a specific theme
+     */
+    setTheme(theme)
+    {
+        if (THEME_CONFIG[theme])
+        {
+            this.applyTheme(theme);
+            this.saveTheme(theme);
+        }
     }
 }
 

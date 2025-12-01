@@ -47,6 +47,7 @@
 
   /* Button Colors - Primary Variant */
   --button-primary-bg: var(--primary-accent);
+  --button-primary-border: var(--primary-accent-hover);
   --button-primary-text: #000000;
   --button-primary-hover-bg: var(--primary-accent-hover);
   --button-primary-hover-text: #000000;
@@ -164,7 +165,8 @@
   --button-hover-text: #ffffff;
 
   /* Button Colors - Primary Variant */
-  --button-primary-bg: #d9534f;
+  --button-primary-bg: var(--bg-light);
+  --button-primary-border: var(--bg-lighter);
   --button-primary-text: #ffffff;
   --button-primary-hover-bg: #e67e72;
   --button-primary-hover-text: #ffffff;
@@ -218,6 +220,126 @@
 
   /* Typography */
   font-family: 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 400;
+
+  /* Rendering */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+
+  color: var(--text-primary);
+  background-color: var(--bg-darkest);
+}
+
+/* Neon Dreams Theme - Blue/Purple/Pink Neon */
+:root.theme-neon {
+  /* ============================================================================
+     THEME 3: Neon Dreams - Cyberpunk Blue/Purple/Pink
+     Clean dark backgrounds with vibrant neon accents
+     ============================================================================ */
+
+  /* Base Colors */
+  --primary-accent: #a855f7;
+  --primary-accent-hover: #c084fc;
+  --primary-accent-active: #9333ea;
+  --danger-color: #f472b6;
+
+  /* Background Palette - Neutral darks with subtle cool undertone */
+  --bg-darkest: #09090b;
+  --bg-dark: #0c0c0f;
+  --bg-medium: #121218;
+  --bg-medium-light: #18181f;
+  --bg-light: #1f1f28;
+  --bg-lighter: #2a2a36;
+  --bg-modal: #0e0e12;
+
+  /* Accent Colors */
+  --accent-primary: var(--primary-accent);
+  --accent-hover: var(--primary-accent-hover);
+  --accent-active: var(--primary-accent-active);
+  --accent-subtle: rgba(168, 85, 247, 0.12);
+  --accent-primary-rgb: 168, 85, 247;
+
+  /* Status Colors */
+  --status-warning: #fbbf24;
+  --status-danger: var(--danger-color);
+  --status-success: #22d3ee;
+
+  /* Text Colors */
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --text-accent: #c084fc;
+  --text-muted: #71717a;
+  --text-inverse: #09090b;
+
+  /* Button Colors - Base Style */
+  --button-bg: rgba(168, 85, 247, 0.1);
+  --button-border: #a855f7;
+  --button-text: #c084fc;
+  --button-hover-bg: #a855f7;
+  --button-hover-border: #c084fc;
+  --button-hover-text: #ffffff;
+
+  /* Button Colors - Primary Variant */
+  --button-primary-bg: #a855f7;
+  --button-primary-border: #c084fc;
+  --button-primary-text: #ffffff;
+  --button-primary-hover-bg: #c084fc;
+  --button-primary-hover-text: #ffffff;
+
+  /* Button Colors - Secondary Variant */
+  --button-secondary-bg: #1f1f28;
+  --button-secondary-border: #2a2a36;
+  --button-secondary-text: #a1a1aa;
+  --button-secondary-hover-bg: #2a2a36;
+  --button-secondary-hover-border: #a855f7;
+  --button-secondary-hover-text: #e4e4e7;
+
+  /* Button Colors - Dark Variant */
+  --button-dark-bg: #0c0c0f;
+  --button-dark-border: #2a2a36;
+  --button-dark-text: #a1a1aa;
+  --button-dark-hover-bg: #18181f;
+  --button-dark-hover-border: #a855f7;
+  --button-dark-hover-text: #e4e4e7;
+
+  /* Button Colors - Danger Variant */
+  --button-danger-bg: #f472b6;
+  --button-danger-text: #09090b;
+  --button-danger-hover-bg: #f9a8d4;
+  --button-danger-hover-text: #09090b;
+
+  /* Button Colors - Success Variant */
+  --button-success-bg: #22d3ee;
+  --button-success-text: #09090b;
+  --button-success-hover-bg: #67e8f9;
+  --button-success-hover-text: #09090b;
+  --button-success-color: #09090b;
+
+  /* Button Colors - Accent Variant */
+  --button-accent-bg: #a855f7;
+  --button-accent-border: #c084fc;
+  --button-accent-text: #ffffff;
+  --button-accent-hover-bg: #c084fc;
+  --button-accent-hover-border: #e9d5ff;
+  --button-accent-hover-text: #ffffff;
+
+  /* Button Styling */
+  --button-rounded-radius: 4px;
+
+  /* Dropdown/Select Colors */
+  --dropdown-bg: #18181f;
+  --dropdown-border: #2a2a36;
+  --dropdown-text: #e4e4e7;
+  --dropdown-hover-bg: #1f1f28;
+  --dropdown-hover-border: #a855f7;
+
+  /* Typography */
+  font-family: 'Segoe UI', 'Roboto', 'Inter', sans-serif;
   font-size: 14px;
   line-height: 1.6;
   font-weight: 400;
@@ -1494,6 +1616,47 @@ input[type="checkbox"]:disabled:hover {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
+  flex: 1;
+}
+
+.action-map-header-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-right: 1rem;
+}
+
+.action-map-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.action-map-btn.btn-clear {
+  background-color: rgba(220, 53, 69, 0.2);
+  color: #ff6b7a;
+  border-color: rgba(220, 53, 69, 0.4);
+}
+
+.action-map-btn.btn-clear:hover {
+  background-color: rgba(220, 53, 69, 0.4);
+  border-color: rgba(220, 53, 69, 0.6);
+}
+
+.action-map-btn.btn-reset {
+  background-color: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border-color: rgba(255, 193, 7, 0.4);
+}
+
+.action-map-btn.btn-reset:hover {
+  background-color: rgba(255, 193, 7, 0.4);
+  border-color: rgba(255, 193, 7, 0.6);
 }
 
 .action-map-toggle {
@@ -1677,6 +1840,36 @@ input[type="checkbox"]:disabled:hover {
   border: 1px dashed var(--bg-light);
 }
 
+.binding-tag-text {
+  display: inline;
+}
+
+.binding-tag-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  font-size: 1.4em;
+  line-height: 1;
+  transition: opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+}
+
+.binding-tag:hover .binding-tag-remove {
+  opacity: 1;
+}
+
+.binding-tag-remove:hover {
+  opacity: 1 !important;
+  transform: scale(1.2);
+}
+
 .binding-label {
   display: inline-flex;
   align-items: center;
@@ -1796,7 +1989,7 @@ input[type="checkbox"]:disabled:hover {
 
 .btn-sm.active {
   background-color: var(--button-primary-bg) !important;
-  border-color: var(--button-primary-bg) !important;
+  border-color: var(--button-primary-border) !important;
   color: var(--button-primary-text) !important;
 }
 
@@ -1817,7 +2010,7 @@ input[type="checkbox"]:disabled:hover {
 .btn-primary {
   background-color: var(--button-primary-bg);
   color: var(--button-primary-text);
-  border-color: var(--button-primary-bg);
+  border-color: var(--button-primary-border);
   border-radius: var(--button-rounded-radius);
   transition: all 0.2s ease;
 }
@@ -2293,13 +2486,7 @@ input[type="checkbox"]:disabled:hover {
 
 .modal-content input,
 .modal-content select {
-  background-color: var(--dropdown-bg);
-  color: var(--dropdown-text);
-  border: 1px solid var(--dropdown-border);
-  padding: 0.75rem;
-  border-radius: 4px;
-  font-family: inherit;
-  transition: all 0.2s;
+  width: 100%;
 }
 
 .modal-content input:focus,
@@ -2616,7 +2803,7 @@ input[type="checkbox"]:disabled:hover {
 .btn-primary {
   background-color: var(--button-primary-bg);
   color: var(--button-primary-text);
-  border-color: var(--button-primary-bg);
+  border-color: var(--button-primary-border);
   border-radius: var(--button-rounded-radius);
   transition: all 0.2s ease;
 }
@@ -2818,7 +3005,7 @@ input[type="checkbox"]:disabled:hover {
 
 .confirmation-modal-content .btn-primary {
   background-color: var(--button-primary-bg);
-  border-color: var(--button-primary-bg);
+  border-color: var(--button-primary-border);
   color: var(--button-primary-text);
   box-shadow: 0 0 15px rgba(var(--accent-primary-rgb), 0.2);
 }
@@ -3705,33 +3892,71 @@ input[type="checkbox"]:disabled:hover {
   color: var(--accent-primary);
 }
 
-/* Theme Switcher Button */
-.theme-switcher {
+/* Theme Switcher Container */
+.theme-switcher-container {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.25rem;
   background-color: var(--bg-medium);
   border: 1px solid var(--bg-light);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
+  border-radius: 6px;
 }
 
-.theme-switcher:hover {
-  background-color: var(--bg-light);
-  color: var(--text-primary);
-  border-color: var(--accent-primary);
-}
-
-.theme-switcher-icon {
-  font-size: 1rem;
-  display: inline-flex;
+.theme-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-btn:hover {
+  transform: scale(1.1);
+  border-color: var(--text-muted);
+}
+
+.theme-btn.active {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 8px rgba(var(--accent-primary-rgb), 0.4);
+}
+
+.theme-sphere {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset -2px -2px 4px rgba(0, 0, 0, 0.3),
+    inset 2px 2px 4px rgba(255, 255, 255, 0.1);
+}
+
+/* Scifi theme sphere - emerald green */
+.theme-sphere-scifi {
+  background: radial-gradient(circle at 30% 30%,
+      #34d399 0%,
+      #10b981 40%,
+      #059669 100%);
+}
+
+/* Red theme sphere - rust red */
+.theme-sphere-red {
+  background: radial-gradient(circle at 30% 30%,
+      #e67e72 0%,
+      #d9534f 40%,
+      #c74444 100%);
+}
+
+/* Neon theme sphere - purple/pink/blue gradient */
+.theme-sphere-neon {
+  background: radial-gradient(circle at 30% 30%,
+      #f472b6 0%,
+      #a855f7 40%,
+      #6366f1 100%);
 }
 
 /* Theme-specific CRT effect adjustments */
@@ -3760,4 +3985,166 @@ input[type="checkbox"]:disabled:hover {
 
 :root.theme-red::-webkit-scrollbar-thumb:hover {
   background: #4a4a4a;
+}
+
+/* ============================================================================
+   NEON THEME SPECIFIC STYLES
+   ============================================================================ */
+
+/* Neon theme CRT effect - subtle purple glow */
+:root.theme-neon .crt::before {
+  background: linear-gradient(rgba(168, 85, 247, 0.02) 50%,
+      rgba(99, 102, 241, 0.02) 50%);
+  background-size: 100% 4px;
+}
+
+:root.theme-neon .crt::after {
+  background: radial-gradient(ellipse at center,
+      rgba(168, 85, 247, 0.05) 0%,
+      rgba(0, 0, 0, 0) 80%);
+}
+
+:root.theme-neon .glow-text {
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.6), 0 0 16px rgba(168, 85, 247, 0.3);
+}
+
+:root.theme-neon .header-logo::before {
+  background: linear-gradient(rgba(168, 85, 247, 0.02) 50%,
+      rgba(99, 102, 241, 0.02) 50%);
+}
+
+:root.theme-neon .header-logo::after {
+  background: radial-gradient(ellipse at center,
+      rgba(168, 85, 247, 0.06) 0%,
+      rgba(0, 0, 0, 0) 70%);
+}
+
+/* Neon theme scrollbar colors */
+:root.theme-neon::-webkit-scrollbar-track {
+  background: #121218;
+}
+
+:root.theme-neon::-webkit-scrollbar-thumb {
+  background: #a855f7;
+}
+
+:root.theme-neon::-webkit-scrollbar-thumb:hover {
+  background: #c084fc;
+}
+
+/* Neon theme special effects - subtle glow on interactive elements */
+:root.theme-neon button:hover:not(:disabled) {
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
+}
+
+:root.theme-neon input:focus,
+:root.theme-neon select:focus {
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+}
+
+:root.theme-neon .tab-btn.active {
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.25);
+}
+
+/* Neon theme binding tags - subtle backgrounds with neon accent borders */
+:root.theme-neon .binding-tag.keyboard {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+
+:root.theme-neon .binding-tag.mouse {
+  background: rgba(244, 114, 182, 0.1);
+  border-color: #f472b6;
+  color: #f9a8d4;
+}
+
+:root.theme-neon .binding-tag.joystick {
+  background: rgba(34, 211, 238, 0.1);
+  border-color: #22d3ee;
+  color: #67e8f9;
+}
+
+:root.theme-neon .binding-tag.gamepad {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: #fbbf24;
+  color: #fcd34d;
+}
+
+:root.theme-neon .action-item.customized {
+  border-left-color: #c084fc;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.06) 0%, transparent 30%);
+}
+
+:root.theme-neon .whats-new-version-section:hover {
+  background-color: rgba(168, 85, 247, 0.05);
+}
+
+/* What's New Modal - Collapsible Version Sections */
+.whats-new-version-section {
+  margin-bottom: 1rem;
+  border: 1px solid var(--bg-light);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.whats-new-version-section:hover {
+  border-color: var(--accent-primary);
+  background-color: rgba(16, 185, 129, 0.05);
+}
+
+.whats-new-version-toggle {
+  width: 100%;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background-color: var(--bg-medium);
+  border: none;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.whats-new-version-toggle:hover {
+  background-color: var(--bg-medium-light);
+  color: var(--accent-primary);
+}
+
+.version-toggle-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  transition: transform 0.3s ease;
+  min-width: 1.2rem;
+}
+
+.whats-new-version-toggle[data-version="0.9.1"] .version-toggle-arrow {
+  transform: rotate(0deg);
+}
+
+.whats-new-version-toggle[data-version="0.9.0"] .version-toggle-arrow {
+  transform: rotate(-90deg);
+}
+
+.whats-new-version-content {
+  padding: 1.5rem;
+  background-color: var(--bg-dark);
+  border-top: 1px solid var(--bg-light);
+  max-height: 1000px;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  opacity: 1;
+}
+
+.whats-new-version-content[style*="display: none"] {
+  max-height: 0;
+  opacity: 0;
+  padding: 0 1.5rem;
+  border-top: none;
 }

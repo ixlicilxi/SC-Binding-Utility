@@ -1861,18 +1861,15 @@ async function startAddButton()
         return;
     }
 
-    // For new pages-based system: check if device is configured
-    if (!currentPage.device_uuid)
+    // Check if device prefix is configured (required for button input mapping)
+    const devicePrefix = currentPage.device_prefix || currentPage.devicePrefix;
+    if (!devicePrefix)
     {
         const showAlert = window.showAlert || alert;
         await showAlert(
-            `Please configure a device for the "${currentPage.name || 'Untitled Page'}" page first.\n\n` +
-            `Click the "Edit" button on the page, then:\n` +
-            `1. Click "🎯 Press Button on Device"\n` +
-            `2. Press any button on your joystick\n` +
-            `3. Click "Save Page"\n\n` +
-            `After that, you'll be able to add buttons to this page.`,
-            'Configure Device First'
+            `Please configure a device prefix for the "${currentPage.name || 'Untitled Page'}" page first.\n\n` +
+            `Click the "Edit" button on the page, then select a device prefix (e.g., js1, js2, etc.) and save.`,
+            'Configure Device Prefix First'
         );
         return;
     }
@@ -3174,18 +3171,26 @@ function prepareSaveData()
 // Show save notification with optional viewer update status
 function showSaveNotification(viewerUpdated = false)
 {
-    const notification = document.createElement('div');
-    notification.className = 'template-save-notification';
-
-    let message = '✓ Template saved successfully';
+    let message = 'Template saved successfully';
     if (viewerUpdated)
     {
         message += ' • Joystick Viewer updated';
     }
 
+    // Use global toast system if available
+    if (window.toast)
+    {
+        window.toast.success(message);
+        return;
+    }
+
+    // Fallback: Create notification element
+    const notification = document.createElement('div');
+    notification.className = 'template-save-notification';
+
     notification.innerHTML = `
         <span class="notification-icon">💾</span>
-        <span class="notification-message">${message}</span>
+        <span class="notification-message">✓ ${message}</span>
     `;
 
     document.body.appendChild(notification);

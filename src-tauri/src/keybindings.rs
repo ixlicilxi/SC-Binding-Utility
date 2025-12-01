@@ -42,12 +42,31 @@ pub struct AllBindsAction {
     pub default_joystick: String,
 }
 
+/// A single control option (child of <options> element)
+/// e.g., <flight_move_pitch invert="1"/>
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ControlOption {
+    pub name: String,
+    pub attributes: Vec<(String, String)>,
+}
+
+/// Device options entry that preserves control settings
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeviceOptions {
+    pub device_type: String,
+    pub instance: String,
+    pub product: String,
+    pub control_options: Vec<ControlOption>,
+}
+
 /// UI header containing metadata about devices and categories
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DeviceInfo {
     pub keyboards: Vec<String>,
     pub mice: Vec<String>,
     pub joysticks: Vec<String>,
+    #[serde(default)]
+    pub device_options: Vec<DeviceOptions>,
 }
 
 /// A single category
@@ -110,6 +129,43 @@ impl Rebind {
         }
 
         // Check all parts for device prefixes (handles modifiers in any position)
+        if input.contains('+') {
+            // Split and check each part for device prefix
+            for part in input.split('+') {
+                let part = part.trim();
+                if part.starts_with("kb") {
+                    return InputType::Keyboard;
+                } else if part.starts_with("mouse") {
+                    return InputType::Mouse;
+                } else if part.starts_with("js") {
+                    return InputType::Joystick;
+                } else if part.starts_with("gp") {
+                    return InputType::Gamepad;
+                }
+            }
+        } else {
+            // No modifiers, check the whole string
+            if input.starts_with("kb") {
+                return InputType::Keyboard;
+            } else if input.starts_with("mouse") {
+                return InputType::Mouse;
+            } else if input.starts_with("js") {
+                return InputType::Joystick;
+            } else if input.starts_with("gp") {
+                return InputType::Gamepad;
+            }
+        }
+
+        InputType::Unknown
+    }
+
+    /// Get the device type from the input string, even for cleared/unbound bindings
+    /// This is used for deduplication - SC only allows ONE binding per device TYPE per action
+    /// Examples: "js1_ " -> Joystick, "kb_ " -> Keyboard, "js2_button5" -> Joystick
+    pub fn get_device_type(&self) -> InputType {
+        let input = self.input.trim();
+
+        // Check the device prefix regardless of whether there's an actual binding
         if input.contains('+') {
             // Split and check each part for device prefix
             for part in input.split('+') {
@@ -307,6 +363,7 @@ impl ActionMaps {
             keyboards: Vec::new(),
             mice: Vec::new(),
             joysticks: Vec::new(),
+            device_options: Vec::new(),
         };
 
         // Use quick-xml's Reader
@@ -314,11 +371,11 @@ impl ActionMaps {
         let mut buf = vec![];
         let mut current_action_map: Option<ActionMap> = None;
         let mut current_action: Option<Action> = None;
+        let mut current_device_options: Option<DeviceOptions> = None;
 
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e))
-                | Ok(quick_xml::events::Event::Empty(ref e)) => {
+                Ok(quick_xml::events::Event::Start(ref e)) => {
                     match e.name().as_ref() {
                         b"ActionMaps" => {
                             // Get profile name
@@ -329,21 +386,10 @@ impl ActionMaps {
                                 }
                             }
                         }
-                        b"category" => {
-                            // Get category label
-                            for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"label" {
-                                    let label =
-                                        String::from_utf8(attr.value.to_vec()).unwrap_or_default();
-                                    if !label.is_empty() {
-                                        categories.push(Category { label });
-                                    }
-                                }
-                            }
-                        }
                         b"options" => {
                             let mut device_type = String::new();
                             let mut product = String::new();
+                            let mut instance = String::new();
 
                             for attr in e.attributes().flatten() {
                                 match attr.key.as_ref() {
@@ -355,18 +401,31 @@ impl ActionMaps {
                                         product = String::from_utf8(attr.value.to_vec())
                                             .unwrap_or_default()
                                     }
+                                    b"instance" => {
+                                        instance = String::from_utf8(attr.value.to_vec())
+                                            .unwrap_or_default()
+                                    }
                                     _ => {}
                                 }
                             }
 
+                            // Add to legacy device lists for backward compatibility
                             if !product.is_empty() {
                                 match device_type.as_str() {
-                                    "keyboard" => devices.keyboards.push(product),
-                                    "mouse" => devices.mice.push(product),
-                                    "joystick" => devices.joysticks.push(product),
+                                    "keyboard" => devices.keyboards.push(product.clone()),
+                                    "mouse" => devices.mice.push(product.clone()),
+                                    "joystick" => devices.joysticks.push(product.clone()),
                                     _ => {}
                                 }
                             }
+
+                            // Start event - this options tag has children (control options)
+                            current_device_options = Some(DeviceOptions {
+                                device_type,
+                                instance,
+                                product,
+                                control_options: Vec::new(),
+                            });
                         }
                         b"actionmap" => {
                             let mut name = String::new();
@@ -394,6 +453,81 @@ impl ActionMaps {
                                 rebinds: Vec::new(),
                             });
                         }
+                        _ => {
+                            // If we're inside an <options> element, capture child elements as control options
+                            if let Some(ref mut device_opts) = current_device_options {
+                                let name = String::from_utf8(e.name().as_ref().to_vec())
+                                    .unwrap_or_default();
+                                let mut attributes = Vec::new();
+                                for attr in e.attributes().flatten() {
+                                    let key = String::from_utf8(attr.key.as_ref().to_vec())
+                                        .unwrap_or_default();
+                                    let value =
+                                        String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                    attributes.push((key, value));
+                                }
+                                device_opts
+                                    .control_options
+                                    .push(ControlOption { name, attributes });
+                            }
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::Empty(ref e)) => {
+                    match e.name().as_ref() {
+                        b"category" => {
+                            // Get category label
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"label" {
+                                    let label =
+                                        String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                    if !label.is_empty() {
+                                        categories.push(Category { label });
+                                    }
+                                }
+                            }
+                        }
+                        b"options" => {
+                            let mut device_type = String::new();
+                            let mut product = String::new();
+                            let mut instance = String::new();
+
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"type" => {
+                                        device_type = String::from_utf8(attr.value.to_vec())
+                                            .unwrap_or_default()
+                                    }
+                                    b"Product" => {
+                                        product = String::from_utf8(attr.value.to_vec())
+                                            .unwrap_or_default()
+                                    }
+                                    b"instance" => {
+                                        instance = String::from_utf8(attr.value.to_vec())
+                                            .unwrap_or_default()
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // Add to legacy device lists for backward compatibility
+                            if !product.is_empty() {
+                                match device_type.as_str() {
+                                    "keyboard" => devices.keyboards.push(product.clone()),
+                                    "mouse" => devices.mice.push(product.clone()),
+                                    "joystick" => devices.joysticks.push(product.clone()),
+                                    _ => {}
+                                }
+                            }
+
+                            // Empty (self-closing) tag - no children
+                            devices.device_options.push(DeviceOptions {
+                                device_type,
+                                instance,
+                                product,
+                                control_options: Vec::new(),
+                            });
+                        }
                         b"rebind" => {
                             let mut input = String::new();
                             let mut multi_tap: Option<u32> = None;
@@ -418,17 +552,51 @@ impl ActionMaps {
                                 }
                             }
                             if let Some(ref mut action) = current_action {
-                                action.rebinds.push(Rebind {
-                                    input,
+                                // Create a temporary rebind to get its device type
+                                let new_rebind = Rebind {
+                                    input: input.clone(),
                                     multi_tap,
-                                    activation_mode: activation_mode_attr,
-                                });
+                                    activation_mode: activation_mode_attr.clone(),
+                                };
+                                let new_device_type = new_rebind.get_device_type();
+
+                                // Star Citizen only allows ONE rebind per device TYPE per action
+                                // (e.g., one joystick binding total, not one per js1/js2)
+                                // Remove any existing rebind from the same device type
+                                action
+                                    .rebinds
+                                    .retain(|r| r.get_device_type() != new_device_type);
+
+                                action.rebinds.push(new_rebind);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            // If we're inside an <options> element, capture child elements as control options
+                            if let Some(ref mut device_opts) = current_device_options {
+                                let name = String::from_utf8(e.name().as_ref().to_vec())
+                                    .unwrap_or_default();
+                                let mut attributes = Vec::new();
+                                for attr in e.attributes().flatten() {
+                                    let key = String::from_utf8(attr.key.as_ref().to_vec())
+                                        .unwrap_or_default();
+                                    let value =
+                                        String::from_utf8(attr.value.to_vec()).unwrap_or_default();
+                                    attributes.push((key, value));
+                                }
+                                device_opts
+                                    .control_options
+                                    .push(ControlOption { name, attributes });
+                            }
+                        }
                     }
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => match e.name().as_ref() {
+                    b"options" => {
+                        // Finalize the current device options when we hit </options>
+                        if let Some(device_opts) = current_device_options.take() {
+                            devices.device_options.push(device_opts);
+                        }
+                    }
                     b"action" => {
                         if let (Some(action), Some(ref mut action_map)) =
                             (current_action.take(), &mut current_action_map)
@@ -555,46 +723,89 @@ impl ActionMaps {
 
         xml.push_str(" </CustomisationUIHeader>\n");
 
-        // Write options for each device type - order matters!
-        // Keyboard options first (if we have keyboard bindings)
-        // if has_keyboard {
-        //     // Use a default keyboard product ID if the devices list is empty
-        //     if !self.devices.keyboards.is_empty() {
-        //         for keyboard in &self.devices.keyboards {
-        //             xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"");
-        //             xml.push_str(keyboard);
-        //             xml.push_str("\"/>\n");
-        //         }
-        //     } else {
-        //         // Add default keyboard product ID
-        //         xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
-        //     }
-        // }
+        // Write options for each device type - preserving control settings if present
+        // First, check if we have preserved device_options with control settings
+        if !self.devices.device_options.is_empty() {
+            // Use preserved device options which include control settings
+            for device_opts in &self.devices.device_options {
+                // Only write if it's a device type we're using
+                let should_write = match device_opts.device_type.as_str() {
+                    "keyboard" => has_keyboard,
+                    "mouse" => has_mouse,
+                    "joystick" => true, // Always include joysticks if present
+                    _ => true,
+                };
 
-        // Mouse options second (if we have mouse bindings)
-        // if has_mouse {
-        //     // Use a default mouse product ID if the devices list is empty
-        //     if !self.devices.mice.is_empty() {
-        //         for mouse in &self.devices.mice {
-        //             xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"");
-        //             xml.push_str(mouse);
-        //             xml.push_str("\"/>\n");
-        //         }
-        //     } else {
-        //         // Add default mouse product ID
-        //         xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
-        //     }
-        // }
+                if should_write {
+                    if device_opts.control_options.is_empty() {
+                        // Self-closing tag if no control options
+                        xml.push_str(&format!(
+                            " <options type=\"{}\" instance=\"{}\" Product=\"{}\"/>\n",
+                            device_opts.device_type, device_opts.instance, device_opts.product
+                        ));
+                    } else {
+                        // Tag with children for control options
+                        xml.push_str(&format!(
+                            " <options type=\"{}\" instance=\"{}\" Product=\"{}\">\n",
+                            device_opts.device_type, device_opts.instance, device_opts.product
+                        ));
+                        for ctrl_opt in &device_opts.control_options {
+                            xml.push_str(&format!("  <{}", ctrl_opt.name));
+                            for (key, value) in &ctrl_opt.attributes {
+                                xml.push_str(&format!(" {}=\"{}\"", key, value));
+                            }
+                            xml.push_str("/>\n");
+                        }
+                        xml.push_str(" </options>\n");
+                    }
+                }
+            }
+        } else {
+            // Fallback to legacy device lists (for backward compatibility)
+            // Write options for each device type - order matters!
+            // Keyboard options first (if we have keyboard bindings)
+            if has_keyboard {
+                // Use a default keyboard product ID if the devices list is empty
+                if !self.devices.keyboards.is_empty() {
+                    for keyboard in &self.devices.keyboards {
+                        xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"");
+                        xml.push_str(keyboard);
+                        xml.push_str("\"/>\n");
+                    }
+                } else {
+                    // Add default keyboard product ID
+                    xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
+                }
+            }
 
-        // Joystick options last
-        // if !self.devices.joysticks.is_empty() {
-        //     for (idx, joystick) in self.devices.joysticks.iter().enumerate() {
-        //         let instance = idx + 1;
-        //         xml.push_str(&format!(" <options type=\"joystick\" instance=\"{}\" Product=\"", instance));
-        //         xml.push_str(joystick);
-        //         xml.push_str("\"/>\n");
-        //     }
-        // }
+            // Mouse options second (if we have mouse bindings)
+            if has_mouse {
+                // Use a default mouse product ID if the devices list is empty
+                if !self.devices.mice.is_empty() {
+                    for mouse in &self.devices.mice {
+                        xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"");
+                        xml.push_str(mouse);
+                        xml.push_str("\"/>\n");
+                    }
+                } else {
+                    // Add default mouse product ID
+                    xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
+                }
+            }
+
+            // Joystick options last
+            if !self.devices.joysticks.is_empty() {
+                for (idx, joystick) in self.devices.joysticks.iter().enumerate() {
+                    let instance = idx + 1;
+                    xml.push_str(&format!(
+                        " <options type=\"joystick\" instance=\"{}\" Product=\"",
+                        instance
+                    ));
+                    xml.push_str(joystick);
+                    xml.push_str("\"/>\n");
+                }
+            }
+        }
 
         xml.push_str(" <modifiers />\n");
 
@@ -636,7 +847,18 @@ impl ActionMaps {
                         xml.push_str(&action.name);
                         xml.push_str("\">\n");
 
+                        // Deduplicate rebinds by device TYPE to ensure we only write one per type
+                        // Star Citizen only accepts one rebind per device TYPE (Joystick, Keyboard, etc.)
+                        // Keep the LAST rebind for each device type (most recent binding)
+                        let mut type_to_rebind: std::collections::HashMap<String, &Rebind> =
+                            std::collections::HashMap::new();
                         for rebind in &action.rebinds {
+                            let device_type = format!("{:?}", rebind.get_device_type());
+                            type_to_rebind.insert(device_type, rebind);
+                        }
+
+                        // Write deduplicated rebinds
+                        for rebind in type_to_rebind.values() {
                             xml.push_str("   <rebind input=\"");
                             xml.push_str(&rebind.input);
                             xml.push_str("\"");
@@ -1582,18 +1804,21 @@ pub fn generate_unbind_xml(
     xml.push_str(" </CustomisationUIHeader>\n");
 
     // Write options for each device type with default Product IDs
-    // if devices.keyboard {
-    //     xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
-    // }
-    // if devices.mouse {
-    //     xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
-    // }
-    // if devices.joystick1 {
-    //     xml.push_str(" <options type=\"joystick\" instance=\"1\" Product=\"\"/>\n");
-    // }
-    // if devices.joystick2 {
-    //     xml.push_str(" <options type=\"joystick\" instance=\"2\" Product=\"\"/>\n");
-    // }
+    if devices.keyboard {
+        xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
+    }
+    if devices.mouse {
+        xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
+    }
+    if devices.joystick1 {
+        xml.push_str(" <options type=\"joystick\" instance=\"1\" Product=\"\"/>\n");
+    }
+    if devices.joystick2 {
+        xml.push_str(" <options type=\"joystick\" instance=\"2\" Product=\"\"/>\n");
+    }
+    if devices.gamepad {
+        xml.push_str(" <options type=\"gamepad\" instance=\"1\" Product=\"\"/>\n");
+    }
 
     // Empty modifiers
     xml.push_str(" <modifiers />\n");
@@ -1614,11 +1839,18 @@ pub fn generate_unbind_xml(
                 // Set escape key explicitly for menu navigation
                 xml.push_str("   <rebind input=\"kb1_escape\" activationMode=\"press\"/>\n");
             } else {
+                // Skip mouse axis actions to preserve view controls (rotateyaw, rotatepitch, etc.)
+                // These are critical for camera/view control and SC handles them differently
+                let is_mouse_axis_action = action.name.contains("yaw")
+                    || action.name.contains("pitch")
+                    || action.name.contains("roll")
+                    || action.default_mouse.contains("maxis_");
+
                 // Add blank rebinds for each selected device for all other actions
                 if devices.keyboard {
                     xml.push_str("   <rebind input=\"kb1_ \"/>\n");
                 }
-                if devices.mouse {
+                if devices.mouse && !is_mouse_axis_action {
                     xml.push_str("   <rebind input=\"mouse1_ \"/>\n");
                 }
                 if devices.gamepad {
@@ -1630,6 +1862,145 @@ pub fn generate_unbind_xml(
                 if devices.joystick2 {
                     xml.push_str("   <rebind input=\"js2_ \"/>\n");
                 }
+            }
+
+            xml.push_str("  </action>\n");
+        }
+
+        xml.push_str(" </actionmap>\n");
+    }
+
+    xml.push_str("</ActionMaps>\n");
+
+    Ok(xml)
+}
+
+/// Generate a restore defaults profile XML with only default bindings for selected devices
+pub fn generate_restore_defaults_xml(
+    all_binds: &AllBinds,
+    devices: &DeviceSelection,
+) -> Result<String, String> {
+    let mut xml = String::new();
+
+    // XML declaration
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+
+    // Root ActionMaps element
+    xml.push_str("<ActionMaps version=\"1\" optionsVersion=\"2\" rebindVersion=\"2\" profileName=\"RESTORE_DEFAULTS\">\n");
+
+    // Write CustomisationUIHeader with proper attributes
+    xml.push_str(" <CustomisationUIHeader label=\"RESTORE_DEFAULTS\" description=\"Restores default bindings for selected devices\" image=\"\">\n");
+
+    // Write devices section - order matters!
+    xml.push_str("  <devices>\n");
+    if devices.keyboard {
+        xml.push_str("   <keyboard instance=\"1\"/>\n");
+    }
+    if devices.mouse {
+        xml.push_str("   <mouse instance=\"1\"/>\n");
+    }
+    if devices.gamepad {
+        xml.push_str("   <gamepad instance=\"1\"/>\n");
+    }
+    if devices.joystick1 {
+        xml.push_str("   <joystick instance=\"1\"/>\n");
+    }
+    if devices.joystick2 {
+        xml.push_str("   <joystick instance=\"2\"/>\n");
+    }
+    xml.push_str("  </devices>\n");
+
+    xml.push_str(" </CustomisationUIHeader>\n");
+
+    // Write options for each device type with default Product IDs
+    if devices.keyboard {
+        xml.push_str(" <options type=\"keyboard\" instance=\"1\" Product=\"Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}\"/>\n");
+    }
+    if devices.mouse {
+        xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
+    }
+    if devices.joystick1 {
+        xml.push_str(" <options type=\"joystick\" instance=\"1\" Product=\"\"/>\n");
+    }
+    if devices.joystick2 {
+        xml.push_str(" <options type=\"joystick\" instance=\"2\" Product=\"\"/>\n");
+    }
+    if devices.gamepad {
+        xml.push_str(" <options type=\"gamepad\" instance=\"1\" Product=\"\"/>\n");
+    }
+
+    // Empty modifiers
+    xml.push_str(" <modifiers />\n");
+
+    // Write actionmaps with default bindings only (no customizations)
+    for action_map in &all_binds.action_maps {
+        let mut has_default_bindings = false;
+
+        // Check if this action map has any default bindings for selected devices
+        for action in &action_map.actions {
+            if (devices.keyboard && !action.default_keyboard.trim().is_empty())
+                || (devices.mouse && !action.default_mouse.trim().is_empty())
+                || (devices.gamepad && !action.default_gamepad.trim().is_empty())
+                || (devices.joystick1 && !action.default_joystick.trim().is_empty())
+                || (devices.joystick2 && !action.default_joystick.trim().is_empty())
+            {
+                has_default_bindings = true;
+                break;
+            }
+        }
+
+        // Only write the action map if it has default bindings for selected devices
+        if !has_default_bindings {
+            continue;
+        }
+
+        xml.push_str(" <actionmap name=\"");
+        xml.push_str(&action_map.name);
+        xml.push_str("\">\n");
+
+        for action in &action_map.actions {
+            let mut default_inputs: Vec<String> = Vec::new();
+
+            // Collect default bindings for selected devices
+            if devices.keyboard && !action.default_keyboard.trim().is_empty() {
+                default_inputs.push(format!("kb1_{}", action.default_keyboard.trim()));
+            }
+            if devices.mouse && !action.default_mouse.trim().is_empty() {
+                default_inputs.push(format!("mouse1_{}", action.default_mouse.trim()));
+            }
+            if devices.gamepad && !action.default_gamepad.trim().is_empty() {
+                default_inputs.push(format!("gp1_{}", action.default_gamepad.trim()));
+            }
+            if devices.joystick1 && !action.default_joystick.trim().is_empty() {
+                default_inputs.push(format!("js1_{}", action.default_joystick.trim()));
+            }
+            if devices.joystick2 && !action.default_joystick.trim().is_empty() {
+                default_inputs.push(format!("js2_{}", action.default_joystick.trim()));
+            }
+
+            // Only write the action if it has default bindings
+            if default_inputs.is_empty() {
+                continue;
+            }
+
+            xml.push_str("  <action name=\"");
+            xml.push_str(&action.name);
+            xml.push_str("\">\n");
+
+            // Write each default binding
+            for input in default_inputs {
+                xml.push_str("   <rebind input=\"");
+                xml.push_str(&input);
+                xml.push_str("\"");
+
+                // Add activation mode if present and not default "press"
+                if !action.activation_mode.is_empty() && action.activation_mode != "press" {
+                    xml.push_str(" activationMode=\"");
+                    xml.push_str(&action.activation_mode);
+                    xml.push_str("\"");
+                }
+
+                xml.push_str("/>\n");
             }
 
             xml.push_str("  </action>\n");

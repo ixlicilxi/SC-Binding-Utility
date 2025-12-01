@@ -209,23 +209,15 @@ fn update_binding(
                     new_rebind.input, new_rebind.multi_tap, new_rebind.activation_mode
                 );
 
-                // Extract device instance from the new input (e.g., "js1" from "js1_button3")
-                let new_device_instance = if let Some(underscore_pos) = new_input.find('_') {
-                    new_input[..underscore_pos].to_string()
-                } else {
-                    new_input.clone()
-                };
+                // Get the device TYPE of the new input
+                // Star Citizen only allows ONE binding per device TYPE per action
+                // (e.g., one joystick binding total, not one per js1/js2)
+                let new_device_type = new_rebind.get_device_type();
 
-                // Remove any existing binding from the same device instance
-                // This ensures we only have one binding per device (js1, js2, kb1, mouse1, etc.)
-                action.rebinds.retain(|r| {
-                    let existing_device_instance = if let Some(underscore_pos) = r.input.find('_') {
-                        r.input[..underscore_pos].to_string()
-                    } else {
-                        r.input.clone()
-                    };
-                    existing_device_instance != new_device_instance
-                });
+                // Remove any existing binding from the same device TYPE
+                action
+                    .rebinds
+                    .retain(|r| r.get_device_type() != new_device_type);
 
                 // Add the new binding
                 action.rebinds.push(new_rebind);
@@ -266,6 +258,7 @@ fn update_binding(
                         keyboards: Vec::new(),
                         mice: Vec::new(),
                         joysticks: Vec::new(),
+                        device_options: Vec::new(),
                     },
                 });
             }
@@ -290,28 +283,18 @@ fn update_binding(
                             activation_mode: activation_mode.clone().unwrap_or_default(),
                         };
 
-                        // Extract device instance from the new input (e.g., "js1" from "js1_button3")
-                        let new_device_instance = if let Some(underscore_pos) = new_input.find('_')
-                        {
-                            new_input[..underscore_pos].to_string()
-                        } else {
-                            new_input.clone()
-                        };
+                        // Get the device TYPE of the new input
+                        // Star Citizen only allows ONE binding per device TYPE per action
+                        let new_device_type = new_rebind.get_device_type();
 
-                        // Remove any existing binding from the same device instance
-                        action.rebinds.retain(|r| {
-                            let existing_device_instance =
-                                if let Some(underscore_pos) = r.input.find('_') {
-                                    r.input[..underscore_pos].to_string()
-                                } else {
-                                    r.input.clone()
-                                };
-                            existing_device_instance != new_device_instance
-                        });
+                        // Remove any existing binding from the same device TYPE
+                        action
+                            .rebinds
+                            .retain(|r| r.get_device_type() != new_device_type);
 
                         // Add the new binding
                         action.rebinds.push(new_rebind);
-                        eprintln!("Successfully updated binding (existing action, replaced same device instance)");
+                        eprintln!("Successfully updated binding (existing action, replaced same device type)");
                         return Ok(());
                     } else {
                         // Create new action
@@ -423,6 +406,59 @@ fn export_keybindings(
 
         // Update profile name to match the filename
         bindings.profile_name = file_name;
+
+        // Always regenerate device Product strings from detected devices on export
+        // This ensures GUIDs are always correct and up-to-date
+        bindings.devices.joysticks.clear();
+        if let Ok(detected_devices) = directinput::detect_joysticks() {
+            info!(
+                "Populating device Product strings from {} detected devices",
+                detected_devices.len()
+            );
+
+            for (idx, device) in detected_devices.iter().enumerate() {
+                // Only add joysticks, not gamepads (gamepads are detected separately in SC)
+                if device.device_type == "Joystick" {
+                    // Build Product string in Star Citizen format
+                    // Format: " DeviceName    {GUID}"
+                    let product_string = if let Some(ref uuid) = device.uuid {
+                        // Convert uuid format "vendor_id:product_id" (e.g., "231d:0200")
+                        // to SC GUID format: {PPPPVVVV-0000-0000-0000-504944564944}
+                        // Example: vendor=0x231D, product=0x0200 -> {0200231D-...}
+                        info!("Device UUID: {}", uuid);
+                        let parts: Vec<&str> = uuid.split(':').collect();
+                        info!("Split parts: {:?}", parts);
+                        if parts.len() == 2 {
+                            // Pad each part to 4 hex digits and uppercase
+                            let vendor_hex = format!("{:0>4}", parts[0].to_uppercase());
+                            let product_hex = format!("{:0>4}", parts[1].to_uppercase());
+                            info!("vendor_hex: {}, product_hex: {}", vendor_hex, product_hex);
+
+                            // Use product_name if available, otherwise fall back to name
+                            let device_display_name =
+                                device.product_name.as_ref().unwrap_or(&device.name);
+
+                            format!(
+                                " {}    {{{}{}-0000-0000-0000-504944564944}}",
+                                device_display_name, product_hex, vendor_hex
+                            )
+                        } else {
+                            format!(" {}", device.name)
+                        }
+                    } else {
+                        format!(" {}", device.name)
+                    };
+
+                    bindings.devices.joysticks.push(product_string);
+                    info!(
+                        "Added joystick {} (instance {}): {}",
+                        device.name,
+                        idx + 1,
+                        bindings.devices.joysticks.last().unwrap()
+                    );
+                }
+            }
+        }
     }
 
     // Drop the mutable borrow before creating immutable borrow
@@ -498,6 +534,37 @@ fn load_all_binds(
     app_state.all_binds = Some(all_binds);
 
     Ok(())
+}
+
+#[tauri::command]
+fn get_all_binds_xml(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // Get the AllBinds.xml path
+    let all_binds_path = if cfg!(debug_assertions) {
+        // Development: look in project root
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+        let exe_dir = exe_path
+            .parent()
+            .ok_or_else(|| "Failed to get exe directory".to_string())?;
+        exe_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "Failed to find project root".to_string())?
+            .join("AllBinds.xml")
+    } else {
+        // Production: use Tauri's resource resolver
+        app_handle
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?
+            .join(RESOURCES_SUBFOLDER)
+            .join("AllBinds.xml")
+    };
+
+    // Read and return the raw XML content
+    std::fs::read_to_string(&all_binds_path)
+        .map_err(|e| format!("Failed to read AllBinds.xml at {:?}: {}", all_binds_path, e))
 }
 
 #[tauri::command]
@@ -743,6 +810,7 @@ fn clear_specific_binding(
                 keyboards: Vec::new(),
                 mice: Vec::new(),
                 joysticks: Vec::new(),
+                device_options: Vec::new(),
             },
         });
     }
@@ -866,19 +934,89 @@ fn save_bindings_to_install(
 ) -> Result<(), String> {
     use std::path::Path;
 
-    let app_state = state.lock().unwrap();
+    // First, verify the installation path still exists
+    let install_path = Path::new(&installation_path);
+    if !install_path.exists() {
+        return Err(format!(
+            "Installation folder no longer exists: {}",
+            installation_path
+        ));
+    }
+    if !install_path.is_dir() {
+        return Err(format!(
+            "Installation path is not a directory: {}",
+            installation_path
+        ));
+    }
 
-    // Get the current bindings
-    let bindings = app_state
-        .current_bindings
-        .as_ref()
-        .ok_or_else(|| "No keybindings loaded".to_string())?;
+    let mut app_state = state.lock().unwrap();
 
-    // Get the filename
+    // Get the filename first (before mutable borrow)
     let file_name = app_state
         .current_file_name
         .as_ref()
-        .ok_or_else(|| "No filename stored".to_string())?;
+        .ok_or_else(|| "No filename stored".to_string())?
+        .clone();
+
+    // Get AllBinds reference (before mutable borrow)
+    let all_binds_option = app_state.all_binds.as_ref().map(|ab| ab.clone());
+
+    // Get the current bindings (need mutable to potentially update devices)
+    let bindings = app_state
+        .current_bindings
+        .as_mut()
+        .ok_or_else(|| "No keybindings loaded".to_string())?;
+
+    // Always regenerate device Product strings from detected devices on export
+    // This ensures GUIDs are always correct and up-to-date
+    bindings.devices.joysticks.clear();
+    {
+        if let Ok(detected_devices) = directinput::detect_joysticks() {
+            info!(
+                "Populating device Product strings from {} detected devices",
+                detected_devices.len()
+            );
+
+            for (idx, device) in detected_devices.iter().enumerate() {
+                if device.device_type == "Joystick" {
+                    let product_string = if let Some(ref uuid) = device.uuid {
+                        // Convert uuid format "vendor_id:product_id" to SC GUID format
+                        let parts: Vec<&str> = uuid.split(':').collect();
+                        if parts.len() == 2 {
+                            // Pad each part to 4 hex digits and uppercase
+                            let vendor_hex = format!("{:0>4}", parts[0].to_uppercase());
+                            let product_hex = format!("{:0>4}", parts[1].to_uppercase());
+
+                            // Use product_name if available, otherwise fall back to name
+                            let device_display_name =
+                                device.product_name.as_ref().unwrap_or(&device.name);
+
+                            format!(
+                                " {}    {{{}{}-0000-0000-0000-504944564944}}",
+                                device_display_name, product_hex, vendor_hex
+                            )
+                        } else {
+                            let device_display_name =
+                                device.product_name.as_ref().unwrap_or(&device.name);
+                            format!(" {}", device_display_name)
+                        }
+                    } else {
+                        let device_display_name =
+                            device.product_name.as_ref().unwrap_or(&device.name);
+                        format!(" {}", device_display_name)
+                    };
+
+                    bindings.devices.joysticks.push(product_string);
+                    info!(
+                        "Added joystick {} (instance {}): {}",
+                        device.name,
+                        idx + 1,
+                        bindings.devices.joysticks.last().unwrap()
+                    );
+                }
+            }
+        }
+    }
 
     // Build the target path: INSTALL\user\client\0\controls\mappings
     let target_dir = Path::new(&installation_path)
@@ -893,13 +1031,10 @@ fn save_bindings_to_install(
         .map_err(|e| format!("Failed to create directory structure: {}", e))?;
 
     // Full path to the target file
-    let target_file = target_dir.join(file_name);
-
-    // Get AllBinds for category mapping
-    let all_binds = app_state.all_binds.as_ref();
+    let target_file = target_dir.join(&file_name);
 
     // Serialize to XML with category information
-    let xml_content = bindings.to_xml_with_categories(all_binds);
+    let xml_content = bindings.to_xml_with_categories(all_binds_option.as_ref());
 
     // Write to the target location
     std::fs::write(&target_file, xml_content)
@@ -1152,6 +1287,148 @@ fn remove_unbind_profile() -> Result<RemoveUnbindResult, String> {
         match fs::remove_file(fallback_path) {
             Ok(_) => {
                 info!("Removed unbind profile from current directory");
+                removed_count += 1;
+            }
+            Err(e) => error!("Failed to remove {}: {}", fallback_path, e),
+        }
+    }
+
+    Ok(RemoveUnbindResult { removed_count })
+}
+
+#[tauri::command]
+fn generate_restore_defaults_profile(
+    devices: keybindings::DeviceSelection,
+    base_path: String,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<UnbindProfileResult, String> {
+    use std::fs;
+
+    info!(
+        "Generating restore defaults profile for devices: keyboard={}, mouse={}, gamepad={}, js1={}, js2={}",
+        devices.keyboard, devices.mouse, devices.gamepad, devices.joystick1, devices.joystick2
+    );
+    info!("Using base path: {}", base_path);
+
+    // Get AllBinds from state
+    let app_state = state
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
+    let all_binds = app_state
+        .all_binds
+        .as_ref()
+        .ok_or("AllBinds not loaded. Please load the keybindings first.")?;
+
+    // Generate the restore defaults XML
+    let restore_defaults_xml = keybindings::generate_restore_defaults_xml(all_binds, &devices)?;
+
+    info!(
+        "Generated restore defaults XML, length: {} bytes",
+        restore_defaults_xml.len()
+    );
+
+    // Try to save to SC installation directories
+    let mut saved_locations = Vec::new();
+
+    // Get SC installations
+    match scan_sc_installations(base_path.clone()) {
+        Ok(installations) => {
+            info!("Found {} SC installations", installations.len());
+            for install in installations {
+                info!(
+                    "Processing installation: {} at {}",
+                    install.name, install.path
+                );
+                let mappings_dir = format!("{}\\user\\client\\0\\controls\\mappings", install.path);
+
+                // Create directory if it doesn't exist
+                if let Err(e) = fs::create_dir_all(&mappings_dir) {
+                    error!(
+                        "Failed to create mappings directory {}: {}",
+                        mappings_dir, e
+                    );
+                    continue;
+                }
+
+                let file_path = format!("{}\\RESTORE_DEFAULTS.xml", mappings_dir);
+                info!("Attempting to write to: {}", file_path);
+                match fs::write(&file_path, &restore_defaults_xml) {
+                    Ok(_) => {
+                        info!(
+                            "Successfully saved restore defaults profile to: {}",
+                            file_path
+                        );
+                        saved_locations.push(file_path);
+                    }
+                    Err(e) => error!("Failed to write to {}: {}", file_path, e),
+                }
+            }
+        }
+        Err(e) => {
+            error!(
+                "Failed to scan SC installations from base path '{}': {}",
+                base_path, e
+            );
+        }
+    }
+
+    // If no installations found, save to current directory as fallback
+    if saved_locations.is_empty() {
+        let fallback_path = "RESTORE_DEFAULTS.xml";
+        fs::write(fallback_path, &restore_defaults_xml)
+            .map_err(|e| format!("Failed to write restore defaults profile: {}", e))?;
+        saved_locations.push(fallback_path.to_string());
+        info!(
+            "Saved restore defaults profile to current directory: {}",
+            fallback_path
+        );
+    }
+
+    Ok(UnbindProfileResult { saved_locations })
+}
+
+#[tauri::command]
+fn remove_restore_defaults_profile() -> Result<RemoveUnbindResult, String> {
+    use std::fs;
+
+    info!("Removing restore defaults profile files");
+
+    let mut removed_count = 0;
+
+    // Get base path for SC installations
+    let base_path = "C:\\Program Files\\Roberts Space Industries\\StarCitizen".to_string();
+
+    // Get SC installations
+    match scan_sc_installations(base_path) {
+        Ok(installations) => {
+            for install in installations {
+                let file_path = format!(
+                    "{}\\user\\client\\0\\controls\\mappings\\RESTORE_DEFAULTS.xml",
+                    install.path
+                );
+
+                if fs::metadata(&file_path).is_ok() {
+                    match fs::remove_file(&file_path) {
+                        Ok(_) => {
+                            info!("Removed restore defaults profile from: {}", file_path);
+                            removed_count += 1;
+                        }
+                        Err(e) => error!("Failed to remove {}: {}", file_path, e),
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to scan SC installations: {}", e);
+        }
+    }
+
+    // Also try to remove from current directory
+    let fallback_path = "RESTORE_DEFAULTS.xml";
+    if fs::metadata(fallback_path).is_ok() {
+        match fs::remove_file(fallback_path) {
+            Ok(_) => {
+                info!("Removed restore defaults profile from current directory");
                 removed_count += 1;
             }
             Err(e) => error!("Failed to remove {}: {}", fallback_path, e),
@@ -1569,6 +1846,7 @@ pub fn run() {
             save_template,
             load_template,
             load_all_binds,
+            get_all_binds_xml,
             get_merged_bindings,
             get_user_customizations,
             restore_user_customizations,
@@ -1586,6 +1864,8 @@ pub fn run() {
             open_url,
             generate_unbind_profile,
             remove_unbind_profile,
+            generate_restore_defaults_profile,
+            remove_restore_defaults_profile,
             scan_character_files,
             deploy_character_to_installation,
             import_character_to_library,

@@ -24,10 +24,33 @@ import
 import { toStarCitizenFormat } from './input-utils.js';
 
 // ========================================
+// Configurable Display Settings
+// ========================================
+
+// Default values from button-renderer constants
+const DEFAULT_CONFIG = {
+    frameWidth: 220,
+    frameHeight: 120,
+    hatWidth: 140,
+    hatHeight: 100,
+    numLines: 5,
+    titleSize: 16,
+    contentSize: 14,
+    greenDefaults: false // When true, show default bindings in green instead of grey
+};
+
+// Current configuration (will be loaded from localStorage or use defaults)
+let displayConfig = { ...DEFAULT_CONFIG };
+
+// ========================================
 // State Management
 // ========================================
 
-// Template and bindings
+// Multi-template support
+let loadedTemplates = []; // Array of { template: templateData, fileName: string }
+let currentTemplateIndex = 0; // Index of currently selected template in loadedTemplates
+
+// Template and bindings (currentTemplate is now derived from loadedTemplates)
 let currentTemplate = null;
 let currentBindings = null;
 
@@ -71,12 +94,13 @@ const DrawMode = {
 // Helper to get current joystick number
 function getCurrentJoystickNumber()
 {
-    if (!currentTemplate) return 1;
+    const template = getCurrentTemplate();
+    if (!template) return 1;
 
     // New pages structure with devicePrefix (v1.1+)
-    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    if (template.pages && template.pages[currentPageIndex])
     {
-        const page = currentTemplate.pages[currentPageIndex];
+        const page = template.pages[currentPageIndex];
 
         // Extract number from device_prefix (snake_case) or devicePrefix (camelCase)
         const prefix = page.device_prefix || page.devicePrefix;
@@ -94,7 +118,7 @@ function getCurrentJoystickNumber()
     }
 
     // Fallback for legacy structure
-    const currentStickData = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
+    const currentStickData = currentPageIndex === 0 ? template.leftStick : template.rightStick;
 
     if (currentStickData)
     {
@@ -116,7 +140,18 @@ function getCurrentJoystickNumber()
         }
     }
 
-    return currentTemplate.joystickNumber || 1;
+    return template.joystickNumber || 1;
+}
+
+/**
+ * Get the current active template from the loadedTemplates array
+ * @returns {Object|null} The current template data or null if none loaded
+ */
+function getCurrentTemplate()
+{
+    if (loadedTemplates.length === 0) return null;
+    if (currentTemplateIndex < 0 || currentTemplateIndex >= loadedTemplates.length) return null;
+    return loadedTemplates[currentTemplateIndex].template;
 }
 
 /**
@@ -125,12 +160,13 @@ function getCurrentJoystickNumber()
  */
 function getCurrentDevicePrefix()
 {
-    if (!currentTemplate) return 'js1';
+    const template = getCurrentTemplate();
+    if (!template) return 'js1';
 
     // New pages structure with devicePrefix (v1.1+)
-    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    if (template.pages && template.pages[currentPageIndex])
     {
-        const page = currentTemplate.pages[currentPageIndex];
+        const page = template.pages[currentPageIndex];
 
         // Use device_prefix (snake_case) or devicePrefix (camelCase) if available
         const prefix = page.device_prefix || page.devicePrefix;
@@ -145,7 +181,7 @@ function getCurrentDevicePrefix()
     }
 
     // Fallback for legacy structure
-    const currentStickData = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
+    const currentStickData = currentPageIndex === 0 ? template.leftStick : template.rightStick;
 
     if (currentStickData)
     {
@@ -159,7 +195,7 @@ function getCurrentDevicePrefix()
         return `js${jsNum}`;
     }
 
-    const jsNum = currentTemplate.joystickNumber || 1;
+    const jsNum = template.joystickNumber || 1;
     return `js${jsNum}`;
 }
 
@@ -245,6 +281,9 @@ window.initializeVisualView = function ()
     canvas = document.getElementById('viewer-canvas');
     ctx = canvas.getContext('2d');
 
+    // Load display configuration from localStorage
+    loadDisplayConfig();
+
     initializeEventListeners();
     loadCurrentBindings();
     restoreViewState();
@@ -257,7 +296,7 @@ window.initializeVisualView = function ()
     document.addEventListener('themechange', () =>
     {
         console.log('Theme changed, refreshing canvas...');
-        if (currentTemplate && window.viewerImage)
+        if (getCurrentTemplate() && window.viewerImage)
         {
             resizeViewerCanvas();
         }
@@ -272,7 +311,7 @@ window.initializeVisualView = function ()
             // Page is now visible - reload bindings in case they changed
             await loadCurrentBindings();
             console.log('Bindings reloaded, action maps:', currentBindings?.action_maps?.length);
-            if (currentTemplate && window.viewerImage)
+            if (getCurrentTemplate() && window.viewerImage)
             {
                 console.log('Redrawing canvas with updated bindings');
                 centerViewOnImage();
@@ -296,15 +335,19 @@ window.initializeVisualView = function ()
             {
                 const savedTemplate = JSON.parse(event.newValue);
                 const savedFileName = localStorage.getItem('editorTemplateFileName');
-                const viewerFileName = localStorage.getItem('viewerTemplateFileName');
 
-                // If the saved template matches what we're viewing, auto-reload it
-                if (viewerFileName && savedFileName && viewerFileName === savedFileName)
+                // Check if the saved template matches any of our loaded templates
+                const matchingIndex = loadedTemplates.findIndex(t => t.fileName === savedFileName);
+                if (matchingIndex !== -1)
                 {
                     console.log(`[VIEWER] Template "${savedFileName}" was updated in editor, auto-reloading...`);
-                    currentTemplate = normalizeTemplateData(savedTemplate);
-                    ViewerState.save('viewerCurrentTemplate', currentTemplate);
-                    displayTemplate();
+                    loadedTemplates[matchingIndex].template = normalizeTemplateData(savedTemplate);
+                    saveLoadedTemplates();
+
+                    if (matchingIndex === currentTemplateIndex)
+                    {
+                        displayTemplate();
+                    }
 
                     // Set flag to notify editor that viewer was updated
                     localStorage.setItem('viewerWasUpdated', 'true');
@@ -338,10 +381,11 @@ function initializeEventListeners()
     // Tab key to navigate pages
     document.addEventListener('keydown', (e) =>
     {
-        if (e.key === 'Tab' && currentTemplate && currentTemplate.pages)
+        const template = getCurrentTemplate();
+        if (e.key === 'Tab' && template && template.pages)
         {
             e.preventDefault(); // Prevent default tab focus behavior
-            const maxPages = currentTemplate.pages.length;
+            const maxPages = template.pages.length;
             if (maxPages > 1)
             {
                 const direction = e.shiftKey ? -1 : 1; // Shift+Tab goes back, Tab goes forward
@@ -366,6 +410,11 @@ function initializeEventListeners()
             {
                 resizeViewerCanvas();
             }
+            // Also refresh keyboard view if visible
+            if (typeof window.refreshKeyboardView === 'function')
+            {
+                window.refreshKeyboardView();
+            }
         });
     }
 
@@ -382,6 +431,11 @@ function initializeEventListeners()
             {
                 resizeViewerCanvas();
             }
+            // Also refresh keyboard view if visible
+            if (typeof window.refreshKeyboardView === 'function')
+            {
+                window.refreshKeyboardView();
+            }
         });
     });
 
@@ -393,6 +447,10 @@ function initializeEventListeners()
 
     const exportImageBtn = document.getElementById('export-image-btn');
     if (exportImageBtn) exportImageBtn.addEventListener('click', exportToImage);
+
+    // Config button
+    const configBtn = document.getElementById('viewer-config-btn');
+    if (configBtn) configBtn.addEventListener('click', openConfigModal);
 
     // Modal
     const templateModalCancel = document.getElementById('template-modal-cancel');
@@ -437,10 +495,15 @@ window.refreshVisualView = async function ()
     {
         await loadCurrentBindings();
         // Redraw canvas if template is loaded
-        if (window.viewerImage && currentTemplate)
+        if (window.viewerImage && getCurrentTemplate())
         {
             centerViewOnImage();
             resizeViewerCanvas();
+        }
+        // Also refresh keyboard view if visible
+        if (typeof window.refreshKeyboardView === 'function')
+        {
+            window.refreshKeyboardView();
         }
     } catch (error)
     {
@@ -471,18 +534,33 @@ async function onTemplateFileSelected(e)
         const text = await file.text();
         const templateData = normalizeTemplateData(JSON.parse(text));
 
-        currentTemplate = templateData;
+        // Check if this template is already loaded (by filename)
+        const existingIndex = loadedTemplates.findIndex(t => t.fileName === file.name);
 
-        // Persist to localStorage using viewer-specific keys
-        ViewerState.save('viewerCurrentTemplate', templateData);
-        localStorage.setItem('viewerTemplateFileName', file.name);
-        localStorage.setItem('viewerTemplateFilePath', file.name); // Store just filename for viewer
-
-        // Update file indicator
-        if (window.updateViewerFileIndicator)
+        if (existingIndex !== -1)
         {
-            window.updateViewerFileIndicator(file.name);
+            // Update existing template and select it
+            loadedTemplates[existingIndex].template = templateData;
+            currentTemplateIndex = existingIndex;
         }
+        else
+        {
+            // Add new template to the array
+            loadedTemplates.push({
+                template: templateData,
+                fileName: file.name
+            });
+            currentTemplateIndex = loadedTemplates.length - 1;
+        }
+
+        // Reset page index when switching templates
+        currentPageIndex = 0;
+
+        // Persist to localStorage
+        saveLoadedTemplates();
+
+        // Update template tabs UI
+        updateTemplateTabs();
 
         displayTemplate();
 
@@ -594,21 +672,37 @@ function loadPersistedTemplate()
 {
     try
     {
-        // Use separate localStorage keys for visual viewer to avoid coupling with template editor
-        const savedTemplate = ViewerState.load('viewerCurrentTemplate');
-        if (savedTemplate)
+        // Load multi-template array from localStorage
+        const savedTemplates = ViewerState.load('viewerLoadedTemplates');
+        const savedTemplateIndex = localStorage.getItem('viewerCurrentTemplateIndex');
+
+        if (savedTemplates && Array.isArray(savedTemplates) && savedTemplates.length > 0)
         {
-            currentTemplate = normalizeTemplateData(savedTemplate);
+            // Restore multi-template state
+            loadedTemplates = savedTemplates.map(t => ({
+                template: normalizeTemplateData(t.template),
+                fileName: t.fileName
+            }));
+
+            currentTemplateIndex = savedTemplateIndex !== null ? parseInt(savedTemplateIndex, 10) : 0;
+            if (currentTemplateIndex < 0 || currentTemplateIndex >= loadedTemplates.length)
+            {
+                currentTemplateIndex = 0;
+            }
 
             // Validate currentPageIndex against available pages
+            const template = getCurrentTemplate();
             let maxPages = 0;
-            if (currentTemplate.pages && currentTemplate.pages.length > 0)
+            if (template)
             {
-                maxPages = currentTemplate.pages.length;
-            }
-            else if (currentTemplate.leftStick || currentTemplate.rightStick)
-            {
-                maxPages = 2; // Legacy dual-stick
+                if (template.pages && template.pages.length > 0)
+                {
+                    maxPages = template.pages.length;
+                }
+                else if (template.leftStick || template.rightStick)
+                {
+                    maxPages = 2; // Legacy dual-stick
+                }
             }
 
             if (currentPageIndex >= maxPages)
@@ -616,23 +710,52 @@ function loadPersistedTemplate()
                 currentPageIndex = 0;
             }
 
-            // Update file indicator with saved filename
-            const savedFileName = localStorage.getItem('viewerTemplateFileName');
-            if (savedFileName && window.updateViewerFileIndicator)
-            {
-                window.updateViewerFileIndicator(savedFileName);
-            }
-            else if (window.showNoTemplateIndicator)
-            {
-                window.showNoTemplateIndicator();
-            }
+            // Update template tabs UI
+            updateTemplateTabs();
 
             displayTemplate();
         }
-        else if (window.showNoTemplateIndicator)
+        else
         {
-            // No template loaded - show no template indicator
-            window.showNoTemplateIndicator();
+            // Try legacy single-template format for backwards compatibility
+            const savedTemplate = ViewerState.load('viewerCurrentTemplate');
+            if (savedTemplate)
+            {
+                const normalizedTemplate = normalizeTemplateData(savedTemplate);
+                const savedFileName = localStorage.getItem('viewerTemplateFileName') || 'Untitled Template';
+
+                loadedTemplates = [{
+                    template: normalizedTemplate,
+                    fileName: savedFileName
+                }];
+                currentTemplateIndex = 0;
+
+                // Validate currentPageIndex
+                let maxPages = 0;
+                if (normalizedTemplate.pages && normalizedTemplate.pages.length > 0)
+                {
+                    maxPages = normalizedTemplate.pages.length;
+                }
+                else if (normalizedTemplate.leftStick || normalizedTemplate.rightStick)
+                {
+                    maxPages = 2;
+                }
+
+                if (currentPageIndex >= maxPages)
+                {
+                    currentPageIndex = 0;
+                }
+
+                // Migrate to new format
+                saveLoadedTemplates();
+                updateTemplateTabs();
+                displayTemplate();
+            }
+            else if (window.showNoTemplateIndicator)
+            {
+                // No template loaded - show no template indicator
+                window.showNoTemplateIndicator();
+            }
         }
     } catch (error)
     {
@@ -640,10 +763,156 @@ function loadPersistedTemplate()
     }
 }
 
+// ========================================
+// Multi-Template Management Functions
+// ========================================
+
+/**
+ * Save loaded templates to localStorage
+ */
+function saveLoadedTemplates()
+{
+    ViewerState.save('viewerLoadedTemplates', loadedTemplates);
+    localStorage.setItem('viewerCurrentTemplateIndex', currentTemplateIndex.toString());
+}
+
+/**
+ * Switch to a different loaded template
+ * @param {number} index - Index in loadedTemplates array
+ */
+function switchTemplate(index)
+{
+    if (index < 0 || index >= loadedTemplates.length) return;
+    if (index === currentTemplateIndex) return;
+
+    currentTemplateIndex = index;
+    currentPageIndex = 0; // Reset to first page when switching templates
+
+    saveLoadedTemplates();
+    ViewerState.saveViewState();
+
+    updateTemplateTabs();
+    displayTemplate();
+}
+
+/**
+ * Close/remove a loaded template
+ * @param {number} index - Index in loadedTemplates array
+ */
+function closeTemplate(index)
+{
+    if (index < 0 || index >= loadedTemplates.length) return;
+
+    loadedTemplates.splice(index, 1);
+
+    // Adjust currentTemplateIndex if needed
+    if (loadedTemplates.length === 0)
+    {
+        currentTemplateIndex = 0;
+        currentPageIndex = 0;
+        saveLoadedTemplates();
+        updateTemplateTabs();
+
+        // Show welcome screen
+        const welcomeScreen = document.getElementById('welcome-screen-visual');
+        if (welcomeScreen) welcomeScreen.style.display = 'flex';
+
+        const canvasContainer = document.getElementById('viewer-canvas-container');
+        if (canvasContainer) canvasContainer.style.display = 'none';
+
+        const viewerControls = document.getElementById('viewer-controls');
+        if (viewerControls) viewerControls.style.display = 'none';
+
+        const toolbar = document.getElementById('modifier-toolbar');
+        if (toolbar) toolbar.style.display = 'none';
+
+        if (window.showNoTemplateIndicator)
+        {
+            window.showNoTemplateIndicator();
+        }
+    }
+    else
+    {
+        // Select the previous template or stay at same index
+        if (currentTemplateIndex >= loadedTemplates.length)
+        {
+            currentTemplateIndex = loadedTemplates.length - 1;
+        }
+        else if (currentTemplateIndex > index)
+        {
+            currentTemplateIndex--;
+        }
+
+        currentPageIndex = 0;
+        saveLoadedTemplates();
+        updateTemplateTabs();
+        displayTemplate();
+    }
+}
+
+/**
+ * Update the template tabs UI in the toolbar
+ */
+function updateTemplateTabs()
+{
+    const templateTabsContainer = document.getElementById('viewer-template-tabs');
+    if (!templateTabsContainer) return;
+
+    const templateTabsDivider = document.querySelector('.template-tabs-divider');
+    templateTabsContainer.innerHTML = '';
+
+    if (loadedTemplates.length === 0)
+    {
+        templateTabsContainer.style.display = 'none';
+        if (templateTabsDivider) templateTabsDivider.style.display = 'none';
+        return;
+    }
+
+    templateTabsContainer.style.display = 'flex';
+    if (templateTabsDivider) templateTabsDivider.style.display = 'block';
+
+    loadedTemplates.forEach((templateInfo, index) =>
+    {
+        const tab = document.createElement('div');
+        tab.className = 'template-tab' + (index === currentTemplateIndex ? ' active' : '');
+        tab.dataset.templateIndex = index;
+
+        // Truncate filename if too long
+        const displayName = templateInfo.fileName.length > 20
+            ? templateInfo.fileName.substring(0, 17) + '...'
+            : templateInfo.fileName;
+
+        tab.innerHTML = `
+            <span class="template-tab-name" title="${templateInfo.fileName}">${displayName}</span>
+            <button class="template-tab-close" title="Close template" data-close-index="${index}">×</button>
+        `;
+
+        // Click to select template
+        tab.addEventListener('click', (e) =>
+        {
+            if (!e.target.classList.contains('template-tab-close'))
+            {
+                switchTemplate(index);
+            }
+        });
+
+        // Close button
+        const closeBtn = tab.querySelector('.template-tab-close');
+        closeBtn.addEventListener('click', (e) =>
+        {
+            e.stopPropagation();
+            closeTemplate(index);
+        });
+
+        templateTabsContainer.appendChild(tab);
+    });
+}
+
 // Page switching
 function switchPage(pageIndex)
 {
-    if (!currentTemplate || !currentTemplate.pages || pageIndex < 0 || pageIndex >= currentTemplate.pages.length)
+    const template = getCurrentTemplate();
+    if (!template || !template.pages || pageIndex < 0 || pageIndex >= template.pages.length)
     {
         return;
     }
@@ -665,22 +934,23 @@ function switchPage(pageIndex)
 // Get current page's button array
 function getCurrentButtons()
 {
-    if (!currentTemplate) return [];
+    const template = getCurrentTemplate();
+    if (!template) return [];
 
     // New pages structure
-    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    if (template.pages && template.pages[currentPageIndex])
     {
-        return currentTemplate.pages[currentPageIndex].buttons || [];
+        return template.pages[currentPageIndex].buttons || [];
     }
 
     // Legacy support: Handle old format with single buttons array
-    if (currentTemplate.buttons && !currentTemplate.rightStick)
+    if (template.buttons && !template.rightStick)
     {
-        return currentPageIndex === 0 ? [] : currentTemplate.buttons;
+        return currentPageIndex === 0 ? [] : template.buttons;
     }
 
     // Legacy support: Get the appropriate stick
-    const stick = currentPageIndex === 0 ? currentTemplate.leftStick : currentTemplate.rightStick;
+    const stick = currentPageIndex === 0 ? template.leftStick : template.rightStick;
 
     // Handle nested structure: { joystickNumber: 1, buttons: [...] }
     if (stick && typeof stick === 'object' && !Array.isArray(stick))
@@ -694,7 +964,8 @@ function getCurrentButtons()
 
 function displayTemplate()
 {
-    if (!currentTemplate) return;
+    const template = getCurrentTemplate();
+    if (!template) return;
 
     // Helper to check if stick has buttons
     const hasButtons = (stick) =>
@@ -706,8 +977,8 @@ function displayTemplate()
     };
 
     // Show/hide stick selector based on whether it's a dual stick template
-    const isDualStick = (currentTemplate.leftStick || currentTemplate.rightStick) &&
-        (hasButtons(currentTemplate.leftStick) || hasButtons(currentTemplate.rightStick));
+    const isDualStick = (template.leftStick || template.rightStick) &&
+        (hasButtons(template.leftStick) || hasButtons(template.rightStick));
 
     const selectorEl = document.getElementById('viewer-stick-selector');
     if (isDualStick)
@@ -754,22 +1025,25 @@ function createPageSelectorButtons()
     // Clear existing buttons
     selectorEl.innerHTML = '';
 
+    const template = getCurrentTemplate();
+    if (!template) return;
+
     // Determine number of pages
     let pages = [];
-    if (currentTemplate.pages && currentTemplate.pages.length > 0)
+    if (template.pages && template.pages.length > 0)
     {
         // New multi-page structure
-        pages = currentTemplate.pages;
+        pages = template.pages;
     }
     else
     {
         // Legacy dual-stick structure
-        const hasLeftStick = currentTemplate.leftStick &&
-            (Array.isArray(currentTemplate.leftStick) ? currentTemplate.leftStick.length > 0 :
-                currentTemplate.leftStick.buttons && currentTemplate.leftStick.buttons.length > 0);
-        const hasRightStick = currentTemplate.rightStick &&
-            (Array.isArray(currentTemplate.rightStick) ? currentTemplate.rightStick.length > 0 :
-                currentTemplate.rightStick.buttons && currentTemplate.rightStick.buttons.length > 0);
+        const hasLeftStick = template.leftStick &&
+            (Array.isArray(template.leftStick) ? template.leftStick.length > 0 :
+                template.leftStick.buttons && template.leftStick.buttons.length > 0);
+        const hasRightStick = template.rightStick &&
+            (Array.isArray(template.rightStick) ? template.rightStick.length > 0 :
+                template.rightStick.buttons && template.rightStick.buttons.length > 0);
 
         if (hasLeftStick)
         {
@@ -829,20 +1103,21 @@ function updatePageSelectorButtons()
 
 function loadPageImage()
 {
-    if (!currentTemplate) return;
+    const template = getCurrentTemplate();
+    if (!template) return;
 
     let imageDataUrl = null;
     let imageFlipped = false;
 
     // New pages structure
-    if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+    if (template.pages && template.pages[currentPageIndex])
     {
-        const currentPage = currentTemplate.pages[currentPageIndex];
+        const currentPage = template.pages[currentPageIndex];
 
         // Check if this page mirrors another page's image
         if (currentPage.mirror_from_page_id)
         {
-            const sourcePage = currentTemplate.pages.find(p => p.id === currentPage.mirror_from_page_id);
+            const sourcePage = template.pages.find(p => p.id === currentPage.mirror_from_page_id);
             if (sourcePage && sourcePage.image_data_url)
             {
                 imageDataUrl = sourcePage.image_data_url;
@@ -857,8 +1132,8 @@ function loadPageImage()
     else
     {
         // Legacy structure
-        imageDataUrl = currentTemplate.imageDataUrl;
-        imageFlipped = (currentTemplate.imageFlipped === currentPageIndex);
+        imageDataUrl = template.imageDataUrl;
+        imageFlipped = (template.imageFlipped === currentPageIndex);
     }
 
     if (imageDataUrl)
@@ -1041,7 +1316,7 @@ function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
     const lineColor = bindings.length > 0 ? accentPrimary : textMuted;
 
-    drawConnectingLine(ctx, button.buttonPos, button.labelPos, ButtonFrameWidth / 2, lineColor, isHat);
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, displayConfig.frameWidth / 2, lineColor, isHat);
 }
 
 function drawSingleButton(button, mode = DrawMode.NORMAL)
@@ -1058,7 +1333,7 @@ function drawSingleButton(button, mode = DrawMode.NORMAL)
         }
         if (button.labelPos)
         {
-            updateBounds(button.labelPos.x, button.labelPos.y, ButtonFrameWidth, ButtonFrameHeight);
+            updateBounds(button.labelPos.x, button.labelPos.y, displayConfig.frameWidth, displayConfig.frameHeight);
         }
         return;
     }
@@ -1085,7 +1360,7 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
     const hasPush = hat.inputs && hat.inputs['push'];
 
     // Use centralized position calculation for consistency with template editor
-    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -1096,14 +1371,14 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, HatFrameWidth, HatFrameHeight);
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
             }
         });
 
         // Calculate title position using same logic as drawHat4WayBoxes
-        const boxHalfHeight = HatFrameHeight / 2;
+        const boxHalfHeight = displayConfig.hatHeight / 2;
         const verticalDistanceWithPush = boxHalfHeight + HatSpacing + boxHalfHeight;
-        const verticalDistanceNoPush = (HatFrameHeight + HatSpacing) / 2;
+        const verticalDistanceNoPush = (displayConfig.hatHeight + HatSpacing) / 2;
         const verticalDistance = hasPush ? verticalDistanceWithPush + (HatSpacing + HatSpacing / 2) : verticalDistanceNoPush + HatSpacing;
         const titleGap = 12;
         const titleY = hat.labelPos.y - verticalDistance - boxHalfHeight - titleGap;
@@ -1159,7 +1434,8 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
                 }
 
                 // Apply styling based on binding type
-                if (binding.isDefault)
+                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
+                if (binding.isDefault && !displayConfig.greenDefaults)
                 {
                     return `[muted]${actionLabel}`;
                 }
@@ -1176,7 +1452,13 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
-        buttonDataForDirection: (dir) => ({ ...hat, direction: dir })
+        buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
+        // Pass display configuration
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
     });
 }
 
@@ -1189,7 +1471,7 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
     const hasPush = hat.inputs && hat.inputs['push'];
 
     // Use centralized position calculation
-    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -1200,13 +1482,13 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, HatFrameWidth, HatFrameHeight);
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
             }
         });
 
-        const boxHalfHeight = HatFrameHeight / 2;
+        const boxHalfHeight = displayConfig.hatHeight / 2;
         const verticalDistanceWithPush = boxHalfHeight + HatSpacing + boxHalfHeight;
-        const verticalDistanceNoPush = (HatFrameHeight + HatSpacing) / 2;
+        const verticalDistanceNoPush = (displayConfig.hatHeight + HatSpacing) / 2;
         const verticalDistance = hasPush ? verticalDistanceWithPush + (HatSpacing + HatSpacing / 2) : verticalDistanceNoPush + HatSpacing;
         const titleGap = 12;
         const titleY = hat.labelPos.y - verticalDistance - boxHalfHeight - titleGap;
@@ -1253,7 +1535,8 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
                     actionLabel += ` (${binding.multiTap}x)`;
                 }
 
-                if (binding.isDefault)
+                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
+                if (binding.isDefault && !displayConfig.greenDefaults)
                 {
                     return `[muted]${actionLabel}`;
                 }
@@ -1269,7 +1552,13 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
-        buttonDataForDirection: (dir) => ({ ...hat, direction: dir })
+        buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
+        // Pass display configuration
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
     });
 }
 
@@ -1282,7 +1571,7 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
     const hasPush = hat.inputs && hat.inputs['push'];
 
     // Use centralized position calculation
-    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -1293,12 +1582,12 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, HatFrameWidth, HatFrameHeight);
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
             }
         });
 
         const titleGap = 12;
-        const titleY = hat.labelPos.y - HatFrameHeight - HatSpacing - titleGap;
+        const titleY = hat.labelPos.y - displayConfig.hatHeight - HatSpacing - titleGap;
 
         const textWidth = 60;
         updateBounds(hat.labelPos.x, titleY, textWidth, 13);
@@ -1342,7 +1631,8 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
                     actionLabel += ` (${binding.multiTap}x)`;
                 }
 
-                if (binding.isDefault)
+                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
+                if (binding.isDefault && !displayConfig.greenDefaults)
                 {
                     return `[muted]${actionLabel}`;
                 }
@@ -1358,7 +1648,13 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
-        buttonDataForDirection: (dir) => ({ ...hat, direction: dir })
+        buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
+        // Pass display configuration
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
     });
 }
 
@@ -1368,8 +1664,8 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
     // Always update bounds in export mode
     if (mode === DrawMode.EXPORT)
     {
-        const width = compact ? HatFrameWidth : ButtonFrameWidth;
-        updateBounds(x, y, width, ButtonFrameHeight);
+        const width = compact ? displayConfig.hatWidth : displayConfig.frameWidth;
+        updateBounds(x, y, width, displayConfig.frameHeight);
     }
 
     // Callback to register clickable boxes
@@ -1392,7 +1688,8 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         }
 
         // Apply styling based on binding type
-        if (binding.isDefault)
+        // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
+        if (binding.isDefault && !displayConfig.greenDefaults)
         {
             return `[muted]${actionLabel}`;
         }
@@ -1400,7 +1697,7 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         return `[action]${actionLabel}`;
     });
 
-    // Use improved rendering function from button-renderer.js
+    // Use improved rendering function from button-renderer.js with display config
     drawButtonBox(ctx, x, y, label, contentLines, compact, {
         hasBinding: bindings.length > 0,
         buttonData: buttonData,
@@ -1411,7 +1708,15 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         subtleColor: '#999',
         mutedColor: '#888',
         actionColor: '#7dd3c0',
-        bindingsData: bindings
+        bindingsData: bindings,
+        // Pass display configuration
+        frameWidth: displayConfig.frameWidth,
+        frameHeight: displayConfig.frameHeight,
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
     });
 }
 
@@ -1572,28 +1877,50 @@ function searchBindings(buttonIdentifier)
         {
             if (!action.bindings || action.bindings.length === 0) continue;
 
-            for (const binding of action.bindings)
+            for (let bindingIndex = 0; bindingIndex < action.bindings.length; bindingIndex++)
             {
+                const binding = action.bindings[bindingIndex];
                 if (binding.input_type === 'Joystick')
                 {
                     let input = binding.input.toLowerCase();
                     let modifiers = [];
+                    let inputWithoutModifier = input;
 
-                    // Extract modifier prefixes
-                    if (input.includes('+'))
+                    // Handle Star Citizen modifier format: js1_lalt+button3
+                    // The modifier is AFTER the device prefix but BEFORE the button
+                    // Format: {device}_{modifier}+{button} OR old format: {modifier}+{device}_{button}
+
+                    // First, try the SC format: js1_lalt+button3
+                    const scModifierMatch = input.match(/^(js\d+|gp\d+)_([a-z]+)\+(.+)$/i);
+                    if (scModifierMatch)
                     {
-                        const parts = input.split('+');
-                        modifiers = parts.slice(0, -1);
-                        input = parts[parts.length - 1];
+                        const devicePrefix = scModifierMatch[1];
+                        modifiers = [scModifierMatch[2]];
+                        const buttonPart = scModifierMatch[3];
+                        inputWithoutModifier = `${devicePrefix}_${buttonPart}`;
+                    }
+                    // Also handle legacy/alternate format: lalt+js1_button3
+                    else if (input.includes('+'))
+                    {
+                        const plusIndex = input.indexOf('+');
+                        const beforePlus = input.substring(0, plusIndex);
+                        const afterPlus = input.substring(plusIndex + 1);
+
+                        // Check if the part before + looks like a modifier (not a device prefix)
+                        if (!beforePlus.match(/^(js|gp|kb|mo)\d+/i))
+                        {
+                            modifiers = [beforePlus];
+                            inputWithoutModifier = afterPlus;
+                        }
                     }
 
                     // Skip invalid/empty joystick bindings
-                    if (!input || input.match(/^js\d+_\s*$/) || input.endsWith('_')) continue;
+                    if (!inputWithoutModifier || inputWithoutModifier.match(/^js\d+_\s*$/) || inputWithoutModifier.endsWith('_')) continue;
 
                     let isMatch = false;
 
-                    // Exact match with input string
-                    if (inputString && (input === inputString || input.startsWith(inputString + '_')))
+                    // Exact match with input string (compare without modifiers)
+                    if (inputString && (inputWithoutModifier === inputString || inputWithoutModifier.startsWith(inputString + '_')))
                     {
                         isMatch = true;
                     }
@@ -1605,7 +1932,7 @@ function searchBindings(buttonIdentifier)
                         // Extract just the axis name from our inputString (e.g., "js2_x" -> "x")
                         const ourAxisName = inputString.split('_').pop();
                         // Extract axis name from the binding (e.g., "js1_x" -> "x")
-                        const bindingAxisName = input.split('_').pop();
+                        const bindingAxisName = inputWithoutModifier.split('_').pop();
                         // If the axis names match and it's a default binding, consider it a match
                         if (ourAxisName === bindingAxisName && binding.is_default)
                         {
@@ -1619,7 +1946,7 @@ function searchBindings(buttonIdentifier)
                         // Only use button number matching if the binding is actually a button
                         // Check that it doesn't contain 'axis' or 'hat' to avoid false matches
                         const buttonPattern = new RegExp(`^${jsPrefix}button${buttonNum}(?:_|$)`);
-                        if (buttonPattern.test(input) && !input.includes('_axis') && !input.includes('_hat'))
+                        if (buttonPattern.test(inputWithoutModifier) && !inputWithoutModifier.includes('_axis') && !inputWithoutModifier.includes('_hat'))
                         {
                             isMatch = true;
                         }
@@ -1643,7 +1970,11 @@ function searchBindings(buttonIdentifier)
 
                         allBindings.push({
                             action: actionLabel,
+                            actionName: action.name, // Internal action name for removal
+                            actionMapName: actionMap.name, // Internal action map name for removal
                             input: binding.display_name,
+                            inputRaw: binding.input, // Raw input string for removal
+                            bindingIndex: bindingIndex, // Index of binding for removal
                             actionMap: mapLabel,
                             isDefault: binding.is_default,
                             modifiers: modifiers,
@@ -1896,7 +2227,7 @@ function showBindingInfo(buttonData, bindings)
         <div class="binding-info-content">
     `;
 
-    bindings.forEach(binding =>
+    bindings.forEach((binding, index) =>
     {
         // Prepare action label with multi-tap indicator if present
         let actionText = binding.action;
@@ -1909,9 +2240,15 @@ function showBindingInfo(buttonData, bindings)
             ? `<div class="binding-info-activation">Activation Mode: ${formatActivationModeLabel(binding.activationMode)}</div>`
             : '';
 
+        // Show remove button for all bindings (including defaults - clearing a default will set it to blank)
+        const removeButtonHtml = `<button class="binding-info-remove-btn" onclick="removeBindingFromVisualView('${escapeForHtml(binding.actionMapName)}', '${escapeForHtml(binding.actionName)}', '${escapeForHtml(binding.inputRaw)}', ${binding.bindingIndex})" title="${binding.isDefault ? 'Clear this default binding' : 'Remove this binding'}">×</button>`;
+
         html += `
-            <div class="binding-info-item">
-                <div class="binding-info-action">${actionText}</div>
+            <div class="binding-info-item ${binding.isDefault ? 'is-default' : ''}">
+                <div class="binding-info-item-header">
+                    <div class="binding-info-action">${actionText}</div>
+                    ${removeButtonHtml}
+                </div>
                 <div class="binding-info-category">${binding.actionMap}</div>
                 ${activationModeHtml}
             </div>
@@ -1919,6 +2256,16 @@ function showBindingInfo(buttonData, bindings)
     });
 
     html += `</div>`;
+
+    // Add the "Add Action" button footer
+    html += `
+        <div class="binding-info-footer">
+            <button class="binding-info-add-action-btn" onclick="openActionSearchModal('${buttonIdString.replace(/'/g, "\\'")}')">
+                <span>+</span> Add Action
+            </button>
+        </div>
+    `;
+
     panel.innerHTML = html;
     panel.style.display = 'block';
     console.log('Panel display set to block');
@@ -1932,6 +2279,61 @@ window.hideBindingInfo = function ()
         panel.style.display = 'none';
     }
     selectedButton = null;
+};
+
+// Helper function to escape strings for HTML attributes
+function escapeForHtml(str)
+{
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/'/g, '&#39;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// Remove binding from visual view and refresh the panel
+window.removeBindingFromVisualView = async function (actionMapName, actionName, rawInput, bindingIndex)
+{
+    console.log('Removing binding from visual view:', { actionMapName, actionName, rawInput, bindingIndex });
+
+    // Call the removeBinding function from main.js
+    // Note: removeBinding expects (actionMapName, actionName, inputToClear) where inputToClear is the raw input STRING
+    if (typeof window.removeBinding === 'function')
+    {
+        try
+        {
+            await window.removeBinding(actionMapName, actionName, rawInput);
+            console.log('Binding removed successfully');
+
+            // Refresh bindings data without resetting pan/zoom
+            await loadCurrentBindings();
+
+            // Just redraw the canvas (preserves pan/zoom)
+            resizeViewerCanvas();
+
+            // Refresh the binding info panel if we still have a selected button
+            if (selectedButton)
+            {
+                // Re-search for bindings and update the panel
+                const bindings = searchBindings(extractButtonIdentifier(
+                    selectedButton.buttonData,
+                    selectedButton.buttonData.direction || null
+                ));
+                showBindingInfo(selectedButton.buttonData, bindings);
+            }
+        }
+        catch (error)
+        {
+            console.error('Error removing binding:', error);
+            alert('Failed to remove binding: ' + error.message);
+        }
+    }
+    else
+    {
+        console.error('removeBinding function not available');
+        alert('Cannot remove binding - function not available');
+    }
 };
 
 function getButtonIdString(buttonData)
@@ -2001,7 +2403,8 @@ const ViewerState = {
 // Global function to find a button name from an input string
 window.findButtonNameForInput = function (inputString)
 {
-    if (!currentTemplate || !inputString) return null;
+    const template = getCurrentTemplate();
+    if (!template || !inputString) return null;
 
     inputString = inputString.toLowerCase().trim();
 
@@ -2010,9 +2413,9 @@ window.findButtonNameForInput = function (inputString)
     {
         // Get device prefix - try to get from page structure
         let devicePrefix = 'js1';
-        if (currentTemplate.pages && currentTemplate.pages[currentPageIndex])
+        if (template.pages && template.pages[currentPageIndex])
         {
-            const page = currentTemplate.pages[currentPageIndex];
+            const page = template.pages[currentPageIndex];
             devicePrefix = page.device_prefix || page.devicePrefix || `js${page.joystickNumber || jsNum}`;
         }
         else
@@ -2107,15 +2510,15 @@ window.findButtonNameForInput = function (inputString)
 
     // Iterate pages
     let pages = [];
-    if (currentTemplate.pages && currentTemplate.pages.length > 0)
+    if (template.pages && template.pages.length > 0)
     {
-        pages = currentTemplate.pages;
+        pages = template.pages;
     }
     else
     {
         // Legacy support
-        if (currentTemplate.leftStick) pages.push({ ...currentTemplate.leftStick, joystickNumber: 1 });
-        if (currentTemplate.rightStick) pages.push({ ...currentTemplate.rightStick, joystickNumber: 2 });
+        if (template.leftStick) pages.push({ ...template.leftStick, joystickNumber: 1 });
+        if (template.rightStick) pages.push({ ...template.rightStick, joystickNumber: 2 });
     }
 
     for (const page of pages)
@@ -2186,7 +2589,7 @@ function resetDrawBounds()
 
 async function exportToImage()
 {
-    if (!window.viewerImage || !currentTemplate)
+    if (!window.viewerImage || !getCurrentTemplate())
     {
         await window.showAlert('Please select a template first', 'Select Template');
         return;
@@ -2344,6 +2747,201 @@ async function exportToImage()
     }
 }
 
+// ========================================
+// Configuration Modal
+// ========================================
+
+function loadDisplayConfig()
+{
+    try
+    {
+        const saved = localStorage.getItem('viewerDisplayConfig');
+        if (saved)
+        {
+            displayConfig = { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+        }
+        else
+        {
+            displayConfig = { ...DEFAULT_CONFIG };
+        }
+    } catch (error)
+    {
+        console.error('Error loading display config:', error);
+        displayConfig = { ...DEFAULT_CONFIG };
+    }
+}
+
+function saveDisplayConfig()
+{
+    try
+    {
+        localStorage.setItem('viewerDisplayConfig', JSON.stringify(displayConfig));
+    } catch (error)
+    {
+        console.error('Error saving display config:', error);
+    }
+}
+
+function openConfigModal()
+{
+    const modal = document.getElementById('viewer-config-modal');
+    if (!modal) return;
+
+    // Populate sliders with current config values
+    const sliders = {
+        'config-frame-width': displayConfig.frameWidth,
+        'config-frame-height': displayConfig.frameHeight,
+        'config-hat-width': displayConfig.hatWidth,
+        'config-hat-height': displayConfig.hatHeight,
+        'config-num-lines': displayConfig.numLines,
+        'config-title-size': displayConfig.titleSize,
+        'config-content-size': displayConfig.contentSize
+    };
+
+    Object.entries(sliders).forEach(([id, value]) =>
+    {
+        const slider = document.getElementById(id);
+        if (slider)
+        {
+            slider.value = value;
+            updateSliderDisplay(id, value);
+        }
+    });
+
+    // Set checkbox state
+    const greenDefaultsCheckbox = document.getElementById('config-green-defaults');
+    if (greenDefaultsCheckbox)
+    {
+        greenDefaultsCheckbox.checked = displayConfig.greenDefaults || false;
+    }
+
+    // Set up slider event listeners
+    Object.keys(sliders).forEach(id =>
+    {
+        const slider = document.getElementById(id);
+        if (slider)
+        {
+            slider.oninput = (e) => updateSliderDisplay(id, e.target.value);
+        }
+    });
+
+    // Set up button event listeners
+    const applyBtn = document.getElementById('config-apply-btn');
+    const resetBtn = document.getElementById('config-reset-btn');
+
+    if (applyBtn)
+    {
+        applyBtn.onclick = applyConfigChanges;
+    }
+
+    if (resetBtn)
+    {
+        resetBtn.onclick = resetConfigToDefaults;
+    }
+
+    // Close modal when clicking outside the modal content
+    modal.onclick = (e) =>
+    {
+        if (e.target === modal)
+        {
+            closeConfigModal();
+        }
+    };
+
+    modal.style.display = 'flex';
+}
+
+function closeConfigModal()
+{
+    const modal = document.getElementById('viewer-config-modal');
+    if (modal)
+    {
+        modal.style.display = 'none';
+    }
+}
+
+function updateSliderDisplay(sliderId, value)
+{
+    const valueId = sliderId + '-value';
+    const valueEl = document.getElementById(valueId);
+    if (!valueEl) return;
+
+    // Format the value based on the slider type
+    if (sliderId.includes('size'))
+    {
+        valueEl.textContent = value + 'px';
+    }
+    else
+    {
+        valueEl.textContent = value;
+    }
+}
+
+function applyConfigChanges()
+{
+    // Read all slider values
+    displayConfig.frameWidth = parseInt(document.getElementById('config-frame-width').value);
+    displayConfig.frameHeight = parseInt(document.getElementById('config-frame-height').value);
+    displayConfig.hatWidth = parseInt(document.getElementById('config-hat-width').value);
+    displayConfig.hatHeight = parseInt(document.getElementById('config-hat-height').value);
+    displayConfig.numLines = parseInt(document.getElementById('config-num-lines').value);
+    displayConfig.titleSize = parseInt(document.getElementById('config-title-size').value);
+    displayConfig.contentSize = parseInt(document.getElementById('config-content-size').value);
+
+    // Read checkbox value
+    const greenDefaultsCheckbox = document.getElementById('config-green-defaults');
+    displayConfig.greenDefaults = greenDefaultsCheckbox ? greenDefaultsCheckbox.checked : false;
+
+    // Save to localStorage
+    saveDisplayConfig();
+
+    // Close modal
+    closeConfigModal();
+
+    // Redraw canvas with new settings
+    if (window.viewerImage)
+    {
+        resizeViewerCanvas();
+    }
+}
+
+function resetConfigToDefaults()
+{
+    displayConfig = { ...DEFAULT_CONFIG };
+
+    // Update all sliders
+    document.getElementById('config-frame-width').value = DEFAULT_CONFIG.frameWidth;
+    document.getElementById('config-frame-height').value = DEFAULT_CONFIG.frameHeight;
+    document.getElementById('config-hat-width').value = DEFAULT_CONFIG.hatWidth;
+    document.getElementById('config-hat-height').value = DEFAULT_CONFIG.hatHeight;
+    document.getElementById('config-num-lines').value = DEFAULT_CONFIG.numLines;
+    document.getElementById('config-title-size').value = DEFAULT_CONFIG.titleSize;
+    document.getElementById('config-content-size').value = DEFAULT_CONFIG.contentSize;
+
+    // Update checkbox
+    const greenDefaultsCheckbox = document.getElementById('config-green-defaults');
+    if (greenDefaultsCheckbox)
+    {
+        greenDefaultsCheckbox.checked = DEFAULT_CONFIG.greenDefaults;
+    }
+
+    // Update displays
+    updateSliderDisplay('config-frame-width', DEFAULT_CONFIG.frameWidth);
+    updateSliderDisplay('config-frame-height', DEFAULT_CONFIG.frameHeight);
+    updateSliderDisplay('config-hat-width', DEFAULT_CONFIG.hatWidth);
+    updateSliderDisplay('config-hat-height', DEFAULT_CONFIG.hatHeight);
+    updateSliderDisplay('config-num-lines', DEFAULT_CONFIG.numLines);
+    updateSliderDisplay('config-title-size', DEFAULT_CONFIG.titleSize);
+    updateSliderDisplay('config-content-size', DEFAULT_CONFIG.contentSize);
+
+    // Save and redraw
+    saveDisplayConfig();
+    if (window.viewerImage)
+    {
+        resizeViewerCanvas();
+    }
+}
+
 // ============================================================================
 // VIEWER FILE INDICATOR MANAGEMENT
 // ============================================================================
@@ -2387,3 +2985,1516 @@ function showNoTemplateIndicator()
 // Export functions for global use
 window.updateViewerFileIndicator = updateViewerFileIndicator;
 window.showNoTemplateIndicator = showNoTemplateIndicator;
+
+// ============================================================================
+// ACTION SEARCH MODAL (Bind actions from Visual View)
+// ============================================================================
+
+let currentSearchButtonId = null; // The button ID we're binding to
+let currentSearchModifier = ''; // The selected modifier key (e.g., "lalt", "lctrl")
+
+/**
+ * Get the full input string with modifier if selected
+ * Star Citizen format: js1_lalt+button3 (modifier goes after device prefix, before button)
+ */
+function getFullInputString()
+{
+    if (!currentSearchButtonId) return null;
+
+    if (currentSearchModifier)
+    {
+        // Parse the button ID to insert modifier in correct position
+        // Format: js1_button3 -> js1_lalt+button3
+        const match = currentSearchButtonId.match(/^(js\d+|gp\d+|kb\d+|mo\d+)_(.+)$/i);
+        if (match)
+        {
+            const devicePrefix = match[1]; // e.g., "js1"
+            const buttonPart = match[2];   // e.g., "button3"
+            return `${devicePrefix}_${currentSearchModifier}+${buttonPart}`;
+        }
+        // Fallback if format doesn't match expected pattern
+        return `${currentSearchModifier}+${currentSearchButtonId}`;
+    }
+    return currentSearchButtonId;
+}
+
+/**
+ * Update the button ID display to show modifier
+ */
+function updateButtonIdDisplay()
+{
+    const buttonIdEl = document.getElementById('action-search-button-id');
+    if (!buttonIdEl) return;
+
+    const fullInput = getFullInputString();
+    buttonIdEl.textContent = fullInput || 'No button selected';
+}
+
+/**
+ * Set the active modifier and update UI
+ */
+function setActiveModifier(modifier)
+{
+    currentSearchModifier = modifier || '';
+
+    // Update button states
+    const buttons = document.querySelectorAll('.modifier-btn');
+    buttons.forEach(btn =>
+    {
+        const btnMod = btn.getAttribute('data-modifier') || '';
+        if (btnMod === currentSearchModifier)
+        {
+            btn.classList.add('active');
+        }
+        else
+        {
+            btn.classList.remove('active');
+        }
+    });
+
+    // Update the displayed button ID
+    updateButtonIdDisplay();
+}
+
+/**
+ * Open the action search modal to bind an action to a button
+ * @param {string} buttonId - The button ID string (e.g., "js1_button3")
+ */
+window.openActionSearchModal = function (buttonId)
+{
+    currentSearchButtonId = buttonId;
+    currentSearchModifier = ''; // Reset modifier
+
+    const modal = document.getElementById('action-search-modal');
+    const buttonIdEl = document.getElementById('action-search-button-id');
+    const searchInput = document.getElementById('action-search-input');
+    const resultsEl = document.getElementById('action-search-results');
+    const clearBtn = document.getElementById('action-search-clear-btn');
+
+    if (!modal) return;
+
+    // Set the button ID display
+    if (buttonIdEl) buttonIdEl.textContent = buttonId;
+
+    // Reset modifier buttons - set "None" as active
+    setActiveModifier('');
+
+    // Clear previous search
+    if (searchInput) searchInput.value = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (resultsEl) resultsEl.innerHTML = '<div class="action-search-empty">Type to search for actions...</div>';
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Focus the search input
+    setTimeout(() =>
+    {
+        if (searchInput) searchInput.focus();
+    }, 100);
+};
+
+/**
+ * Close the action search modal
+ */
+window.closeActionSearchModal = function ()
+{
+    const modal = document.getElementById('action-search-modal');
+    if (modal) modal.style.display = 'none';
+    currentSearchButtonId = null;
+    currentSearchModifier = '';
+};
+
+/**
+ * Fuzzy search with support for | (OR) and + (AND) operators
+ * @param {string} query - The search query
+ * @param {string} text - The text to search in
+ * @returns {object} - { matches: boolean, score: number, highlights: Array }
+ */
+function fuzzySearchWithOperators(query, text)
+{
+    if (!query || !text) return { matches: false, score: 0, highlights: [] };
+
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase().trim();
+
+    // Handle OR operator (|)
+    if (lowerQuery.includes('|'))
+    {
+        const orParts = lowerQuery.split('|').map(p => p.trim()).filter(Boolean);
+        let bestResult = { matches: false, score: 0, highlights: [] };
+
+        for (const part of orParts)
+        {
+            const result = fuzzySearchSingle(part, text, lowerText);
+            if (result.matches && result.score > bestResult.score)
+            {
+                bestResult = result;
+            }
+        }
+        return bestResult;
+    }
+
+    // Handle AND operator (+)
+    if (lowerQuery.includes('+'))
+    {
+        const andParts = lowerQuery.split('+').map(p => p.trim()).filter(Boolean);
+        let allMatch = true;
+        let totalScore = 0;
+        let allHighlights = [];
+
+        for (const part of andParts)
+        {
+            const result = fuzzySearchSingle(part, text, lowerText);
+            if (!result.matches)
+            {
+                allMatch = false;
+                break;
+            }
+            totalScore += result.score;
+            allHighlights.push(...result.highlights);
+        }
+
+        if (allMatch)
+        {
+            // Merge overlapping highlights
+            allHighlights = mergeHighlights(allHighlights);
+            return { matches: true, score: totalScore / andParts.length, highlights: allHighlights };
+        }
+        return { matches: false, score: 0, highlights: [] };
+    }
+
+    // Single term fuzzy search
+    return fuzzySearchSingle(lowerQuery, text, lowerText);
+}
+
+/**
+ * Single term fuzzy search
+ */
+function fuzzySearchSingle(query, originalText, lowerText)
+{
+    const highlights = [];
+
+    // Exact substring match (highest score)
+    const exactIndex = lowerText.indexOf(query);
+    if (exactIndex !== -1)
+    {
+        highlights.push({ start: exactIndex, end: exactIndex + query.length });
+        return { matches: true, score: 100 + (query.length / lowerText.length * 50), highlights };
+    }
+
+    // Word boundary match
+    const words = lowerText.split(/[\s_\-]+/);
+    for (let i = 0, pos = 0; i < words.length; i++)
+    {
+        const word = words[i];
+        if (word.startsWith(query))
+        {
+            const actualPos = lowerText.indexOf(word, pos);
+            highlights.push({ start: actualPos, end: actualPos + query.length });
+            return { matches: true, score: 80 + (query.length / word.length * 20), highlights };
+        }
+        pos = lowerText.indexOf(word, pos) + word.length;
+    }
+
+    // Fuzzy character matching
+    let queryIndex = 0;
+    let score = 0;
+    let lastMatchIndex = -1;
+
+    for (let i = 0; i < lowerText.length && queryIndex < query.length; i++)
+    {
+        if (lowerText[i] === query[queryIndex])
+        {
+            highlights.push({ start: i, end: i + 1 });
+
+            // Consecutive matches get bonus
+            if (lastMatchIndex === i - 1) score += 3;
+            else score += 1;
+
+            // Word start bonus
+            if (i === 0 || /[\s_\-]/.test(lowerText[i - 1])) score += 2;
+
+            lastMatchIndex = i;
+            queryIndex++;
+        }
+    }
+
+    if (queryIndex === query.length)
+    {
+        // Merge consecutive highlights
+        const mergedHighlights = mergeHighlights(highlights);
+        return { matches: true, score: score, highlights: mergedHighlights };
+    }
+
+    return { matches: false, score: 0, highlights: [] };
+}
+
+/**
+ * Merge overlapping or consecutive highlight ranges
+ */
+function mergeHighlights(highlights)
+{
+    if (highlights.length <= 1) return highlights;
+
+    // Sort by start position
+    highlights.sort((a, b) => a.start - b.start);
+
+    const merged = [highlights[0]];
+    for (let i = 1; i < highlights.length; i++)
+    {
+        const last = merged[merged.length - 1];
+        const current = highlights[i];
+
+        if (current.start <= last.end)
+        {
+            last.end = Math.max(last.end, current.end);
+        }
+        else
+        {
+            merged.push(current);
+        }
+    }
+
+    return merged;
+}
+
+/**
+ * Apply highlights to text for display
+ */
+function applyHighlights(text, highlights)
+{
+    if (!highlights || highlights.length === 0) return escapeHtml(text);
+
+    let result = '';
+    let lastIndex = 0;
+
+    for (const h of highlights)
+    {
+        // Add text before highlight
+        result += escapeHtml(text.substring(lastIndex, h.start));
+        // Add highlighted text
+        result += `<span class="highlight">${escapeHtml(text.substring(h.start, h.end))}</span>`;
+        lastIndex = h.end;
+    }
+
+    // Add remaining text
+    result += escapeHtml(text.substring(lastIndex));
+
+    return result;
+}
+
+/**
+ * Escape HTML special characters
+ */
+function escapeHtml(text)
+{
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Search through all actions and return matching results
+ */
+function searchActions(query)
+{
+    const keybindings = window.getCurrentKeybindings ? window.getCurrentKeybindings() : null;
+    if (!keybindings || !keybindings.action_maps) return [];
+
+    const results = [];
+
+    for (const actionMap of keybindings.action_maps)
+    {
+        if (!actionMap.actions) continue;
+
+        // Get display name for action map (same pattern as keybindings-page.js)
+        const actionMapDisplayName = actionMap.ui_label || actionMap.display_name || actionMap.name;
+
+        for (const action of actionMap.actions)
+        {
+            // Get display name for action (same pattern as keybindings-page.js)
+            const actionDisplayName = action.ui_label || action.display_name || action.name;
+
+            // Search in both display name AND system name for better matching
+            const displaySearchResult = fuzzySearchWithOperators(query, actionDisplayName);
+            const systemSearchResult = fuzzySearchWithOperators(query, action.name);
+
+            // Use the best match between display name and system name
+            const bestMatch = displaySearchResult.score >= systemSearchResult.score
+                ? displaySearchResult
+                : systemSearchResult;
+
+            if (bestMatch.matches)
+            {
+                // Get existing bindings for display
+                const existingBindings = action.bindings
+                    ? action.bindings
+                        .filter(b => b.input && b.input !== ' ')
+                        .map(b => b.display_name || b.input)
+                        .slice(0, 3)
+                    : [];
+
+                // Always apply highlights to the display name for consistent UI
+                const highlightsForDisplay = displaySearchResult.matches
+                    ? displaySearchResult.highlights
+                    : []; // No highlights if only system name matched
+
+                results.push({
+                    actionMap: actionMap.name,
+                    actionMapDisplayName: actionMapDisplayName,
+                    actionName: action.name,
+                    actionDisplayName: actionDisplayName,
+                    score: bestMatch.score,
+                    highlights: highlightsForDisplay,
+                    existingBindings: existingBindings
+                });
+            }
+        }
+    }
+
+    // Sort by score (descending)
+    results.sort((a, b) => b.score - a.score);
+
+    // Limit results
+    return results.slice(0, 50);
+}
+
+/**
+ * Render search results
+ */
+function renderActionSearchResults(results)
+{
+    const resultsEl = document.getElementById('action-search-results');
+    if (!resultsEl) return;
+
+    if (results.length === 0)
+    {
+        resultsEl.innerHTML = `
+            <div class="action-search-no-results">
+                <div class="no-results-icon">🔍</div>
+                <div>No matching actions found</div>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    for (const result of results)
+    {
+        const highlightedName = applyHighlights(result.actionDisplayName, result.highlights);
+
+        // Show existing bindings if any
+        let bindingsHtml = '';
+        if (result.existingBindings.length > 0)
+        {
+            bindingsHtml = `<div class="action-search-result-bindings">
+                Current: ${result.existingBindings.map(b => `<code>${escapeHtml(b)}</code>`).join('')}
+                ${result.existingBindings.length === 3 ? '...' : ''}
+            </div>`;
+        }
+
+        html += `
+            <div class="action-search-result-item">
+                <div class="action-search-result-info">
+                    <div class="action-search-result-name">${highlightedName}</div>
+                    <div class="action-search-result-category">${escapeHtml(result.actionMapDisplayName)}</div>
+                    ${bindingsHtml}
+                </div>
+                <button class="action-search-bind-btn" 
+                        onclick="bindActionFromSearch('${escapeHtml(result.actionMap)}', '${escapeHtml(result.actionName)}')">
+                    Bind
+                </button>
+            </div>
+        `;
+    }
+
+    resultsEl.innerHTML = html;
+}
+
+/**
+ * Handle binding an action from the search modal
+ */
+window.bindActionFromSearch = async function (actionMapName, actionName)
+{
+    if (!currentSearchButtonId)
+    {
+        console.error('No button ID set for binding');
+        return;
+    }
+
+    // Get the full input string with modifier
+    const fullInputString = getFullInputString();
+
+    console.log(`Binding ${actionMapName}/${actionName} to ${fullInputString}`);
+
+    try
+    {
+        // Use the applyBinding function from keybindings-page.js
+        if (window.applyBinding)
+        {
+            await window.applyBinding(actionMapName, actionName, fullInputString, null, null);
+
+            // Close the modal
+            closeActionSearchModal();
+
+            // Refresh the visual view to show the new binding
+            if (window.refreshVisualView)
+            {
+                await window.refreshVisualView();
+            }
+
+            // Refresh the binding info panel if we still have a selected button
+            if (selectedButton)
+            {
+                // Re-search for bindings and update the panel
+                const bindings = searchBindings(extractButtonIdentifier(
+                    selectedButton.buttonData,
+                    selectedButton.buttonData.direction || null
+                ));
+                showBindingInfo(selectedButton.buttonData, bindings);
+            }
+
+            // Show success message
+            if (window.showSuccessMessage)
+            {
+                window.showSuccessMessage(`Bound "${actionName}" to ${fullInputString}`);
+            }
+        }
+        else
+        {
+            console.error('applyBinding function not available');
+            alert('Error: Binding system not loaded. Please load keybindings first.');
+        }
+    }
+    catch (error)
+    {
+        console.error('Error binding action:', error);
+        alert(`Error binding action: ${error.message || error}`);
+    }
+};
+
+// Initialize action search modal event listeners
+function initActionSearchModal()
+{
+    const searchInput = document.getElementById('action-search-input');
+    const clearBtn = document.getElementById('action-search-clear-btn');
+    const cancelBtn = document.getElementById('action-search-cancel-btn');
+    const modal = document.getElementById('action-search-modal');
+
+    if (searchInput)
+    {
+        // Debounce search
+        let searchTimeout = null;
+
+        searchInput.addEventListener('input', () =>
+        {
+            const query = searchInput.value.trim();
+
+            // Show/hide clear button
+            if (clearBtn) clearBtn.style.display = query ? 'block' : 'none';
+
+            // Debounce search
+            if (searchTimeout) clearTimeout(searchTimeout);
+
+            if (!query)
+            {
+                const resultsEl = document.getElementById('action-search-results');
+                if (resultsEl) resultsEl.innerHTML = '<div class="action-search-empty">Type to search for actions...</div>';
+                return;
+            }
+
+            searchTimeout = setTimeout(() =>
+            {
+                const results = searchActions(query);
+                renderActionSearchResults(results);
+            }, 150);
+        });
+
+        // Handle Enter key to bind first result
+        searchInput.addEventListener('keydown', (e) =>
+        {
+            if (e.key === 'Escape')
+            {
+                closeActionSearchModal();
+            }
+        });
+    }
+
+    if (clearBtn)
+    {
+        clearBtn.addEventListener('click', () =>
+        {
+            if (searchInput) searchInput.value = '';
+            clearBtn.style.display = 'none';
+            const resultsEl = document.getElementById('action-search-results');
+            if (resultsEl) resultsEl.innerHTML = '<div class="action-search-empty">Type to search for actions...</div>';
+            if (searchInput) searchInput.focus();
+        });
+    }
+
+    if (cancelBtn)
+    {
+        cancelBtn.addEventListener('click', closeActionSearchModal);
+    }
+
+    // Close modal when clicking outside
+    if (modal)
+    {
+        modal.addEventListener('click', (e) =>
+        {
+            if (e.target === modal)
+            {
+                closeActionSearchModal();
+            }
+        });
+    }
+
+    // Initialize modifier button event listeners
+    const modifierBtns = document.querySelectorAll('.modifier-btn');
+    modifierBtns.forEach(btn =>
+    {
+        btn.addEventListener('click', () =>
+        {
+            const modifier = btn.getAttribute('data-modifier') || '';
+            setActiveModifier(modifier);
+        });
+    });
+}
+
+// Initialize on DOM ready
+if (document.readyState === 'loading')
+{
+    document.addEventListener('DOMContentLoaded', initActionSearchModal);
+}
+else
+{
+    initActionSearchModal();
+}
+
+// ============================================================================
+// KEYBOARD VIEW FUNCTIONALITY
+// ============================================================================
+
+let keyboardViewVisible = false;
+let keyboardContainer = null;
+let selectedKeyElement = null;
+
+// Keyboard view pan/zoom state
+let keyboardZoom = 1.0;
+let keyboardPan = { x: 0, y: 0 };
+let keyboardIsPanning = false;
+let keyboardLastPanPos = { x: 0, y: 0 };
+
+// Star Citizen key code mapping (keyboard code -> SC format)
+const SC_KEY_MAP = {
+    // Function keys
+    'Escape': 'escape', 'F1': 'f1', 'F2': 'f2', 'F3': 'f3', 'F4': 'f4',
+    'F5': 'f5', 'F6': 'f6', 'F7': 'f7', 'F8': 'f8', 'F9': 'f9',
+    'F10': 'f10', 'F11': 'f11', 'F12': 'f12',
+
+    // Number row
+    'Backquote': 'grave', 'Digit1': '1', 'Digit2': '2', 'Digit3': '3', 'Digit4': '4',
+    'Digit5': '5', 'Digit6': '6', 'Digit7': '7', 'Digit8': '8', 'Digit9': '9',
+    'Digit0': '0', 'Minus': 'minus', 'Equal': 'equals', 'Backspace': 'backspace',
+
+    // Top row
+    'Tab': 'tab', 'KeyQ': 'q', 'KeyW': 'w', 'KeyE': 'e', 'KeyR': 'r',
+    'KeyT': 't', 'KeyY': 'y', 'KeyU': 'u', 'KeyI': 'i', 'KeyO': 'o',
+    'KeyP': 'p', 'BracketLeft': 'lbracket', 'BracketRight': 'rbracket', 'Backslash': 'backslash',
+
+    // Home row
+    'CapsLock': 'capslock', 'KeyA': 'a', 'KeyS': 's', 'KeyD': 'd', 'KeyF': 'f',
+    'KeyG': 'g', 'KeyH': 'h', 'KeyJ': 'j', 'KeyK': 'k', 'KeyL': 'l',
+    'Semicolon': 'semicolon', 'Quote': 'apostrophe', 'Enter': 'enter',
+
+    // Bottom row
+    'ShiftLeft': 'lshift', 'KeyZ': 'z', 'KeyX': 'x', 'KeyC': 'c', 'KeyV': 'v',
+    'KeyB': 'b', 'KeyN': 'n', 'KeyM': 'm', 'Comma': 'comma', 'Period': 'period',
+    'Slash': 'slash', 'ShiftRight': 'rshift',
+
+    // Bottom control row
+    'ControlLeft': 'lctrl', 'MetaLeft': 'lwin', 'AltLeft': 'lalt', 'Space': 'space',
+    'AltRight': 'ralt', 'MetaRight': 'rwin', 'ContextMenu': 'apps', 'ControlRight': 'rctrl',
+
+    // Navigation cluster
+    'PrintScreen': 'print', 'ScrollLock': 'scrolllock', 'Pause': 'pause',
+    'Insert': 'insert', 'Home': 'home', 'PageUp': 'pgup',
+    'Delete': 'delete', 'End': 'end', 'PageDown': 'pgdn',
+
+    // Arrow keys
+    'ArrowUp': 'up', 'ArrowLeft': 'left', 'ArrowDown': 'down', 'ArrowRight': 'right',
+
+    // Numpad
+    'NumLock': 'numlock', 'NumpadDivide': 'np_divide', 'NumpadMultiply': 'np_multiply', 'NumpadSubtract': 'np_subtract',
+    'Numpad7': 'np_7', 'Numpad8': 'np_8', 'Numpad9': 'np_9', 'NumpadAdd': 'np_add',
+    'Numpad4': 'np_4', 'Numpad5': 'np_5', 'Numpad6': 'np_6',
+    'Numpad1': 'np_1', 'Numpad2': 'np_2', 'Numpad3': 'np_3', 'NumpadEnter': 'np_enter',
+    'Numpad0': 'np_0', 'NumpadDecimal': 'np_period'
+};
+
+// Keyboard layout definition
+const KEYBOARD_LAYOUT = {
+    // Function row
+    functionRow: [
+        { code: 'Escape', label: 'Esc', width: '1u' },
+        { spacer: true, width: '1u' },
+        { code: 'F1', label: 'F1', width: '1u' },
+        { code: 'F2', label: 'F2', width: '1u' },
+        { code: 'F3', label: 'F3', width: '1u' },
+        { code: 'F4', label: 'F4', width: '1u' },
+        { spacer: true, width: '0.5u' },
+        { code: 'F5', label: 'F5', width: '1u' },
+        { code: 'F6', label: 'F6', width: '1u' },
+        { code: 'F7', label: 'F7', width: '1u' },
+        { code: 'F8', label: 'F8', width: '1u' },
+        { spacer: true, width: '0.5u' },
+        { code: 'F9', label: 'F9', width: '1u' },
+        { code: 'F10', label: 'F10', width: '1u' },
+        { code: 'F11', label: 'F11', width: '1u' },
+        { code: 'F12', label: 'F12', width: '1u' }
+    ],
+
+    // Navigation cluster function row
+    navFunctionRow: [
+        { code: 'PrintScreen', label: 'PrtSc', width: '1u' },
+        { code: 'ScrollLock', label: 'ScrLk', width: '1u' },
+        { code: 'Pause', label: 'Pause', width: '1u' }
+    ],
+
+    // Number row
+    numberRow: [
+        { code: 'Backquote', label: '`', width: '1u' },
+        { code: 'Digit1', label: '1', width: '1u' },
+        { code: 'Digit2', label: '2', width: '1u' },
+        { code: 'Digit3', label: '3', width: '1u' },
+        { code: 'Digit4', label: '4', width: '1u' },
+        { code: 'Digit5', label: '5', width: '1u' },
+        { code: 'Digit6', label: '6', width: '1u' },
+        { code: 'Digit7', label: '7', width: '1u' },
+        { code: 'Digit8', label: '8', width: '1u' },
+        { code: 'Digit9', label: '9', width: '1u' },
+        { code: 'Digit0', label: '0', width: '1u' },
+        { code: 'Minus', label: '-', width: '1u' },
+        { code: 'Equal', label: '=', width: '1u' },
+        { code: 'Backspace', label: 'Backspace', width: '2u' }
+    ],
+
+    // Navigation cluster row 1
+    navRow1: [
+        { code: 'Insert', label: 'Ins', width: '1u' },
+        { code: 'Home', label: 'Home', width: '1u' },
+        { code: 'PageUp', label: 'PgUp', width: '1u' }
+    ],
+
+    // Numpad row 1
+    numpadRow1: [
+        { code: 'NumLock', label: 'Num', width: '1u' },
+        { code: 'NumpadDivide', label: '/', width: '1u' },
+        { code: 'NumpadMultiply', label: '*', width: '1u' },
+        { code: 'NumpadSubtract', label: '-', width: '1u' }
+    ],
+
+    // QWERTY row
+    qwertyRow: [
+        { code: 'Tab', label: 'Tab', width: '1-5u' },
+        { code: 'KeyQ', label: 'Q', width: '1u' },
+        { code: 'KeyW', label: 'W', width: '1u' },
+        { code: 'KeyE', label: 'E', width: '1u' },
+        { code: 'KeyR', label: 'R', width: '1u' },
+        { code: 'KeyT', label: 'T', width: '1u' },
+        { code: 'KeyY', label: 'Y', width: '1u' },
+        { code: 'KeyU', label: 'U', width: '1u' },
+        { code: 'KeyI', label: 'I', width: '1u' },
+        { code: 'KeyO', label: 'O', width: '1u' },
+        { code: 'KeyP', label: 'P', width: '1u' },
+        { code: 'BracketLeft', label: '[', width: '1u' },
+        { code: 'BracketRight', label: ']', width: '1u' },
+        { code: 'Backslash', label: '\\', width: '1-5u' }
+    ],
+
+    // Navigation cluster row 2
+    navRow2: [
+        { code: 'Delete', label: 'Del', width: '1u' },
+        { code: 'End', label: 'End', width: '1u' },
+        { code: 'PageDown', label: 'PgDn', width: '1u' }
+    ],
+
+    // Numpad row 2
+    numpadRow2: [
+        { code: 'Numpad7', label: '7', width: '1u' },
+        { code: 'Numpad8', label: '8', width: '1u' },
+        { code: 'Numpad9', label: '9', width: '1u' },
+        { code: 'NumpadAdd', label: '+', width: '1u', height: '2u' }
+    ],
+
+    // Home row (ASDF)
+    homeRow: [
+        { code: 'CapsLock', label: 'Caps', width: '1-75u' },
+        { code: 'KeyA', label: 'A', width: '1u' },
+        { code: 'KeyS', label: 'S', width: '1u' },
+        { code: 'KeyD', label: 'D', width: '1u' },
+        { code: 'KeyF', label: 'F', width: '1u' },
+        { code: 'KeyG', label: 'G', width: '1u' },
+        { code: 'KeyH', label: 'H', width: '1u' },
+        { code: 'KeyJ', label: 'J', width: '1u' },
+        { code: 'KeyK', label: 'K', width: '1u' },
+        { code: 'KeyL', label: 'L', width: '1u' },
+        { code: 'Semicolon', label: ';', width: '1u' },
+        { code: 'Quote', label: "'", width: '1u' },
+        { code: 'Enter', label: 'Enter', width: '2-25u' }
+    ],
+
+    // Numpad row 3
+    numpadRow3: [
+        { code: 'Numpad4', label: '4', width: '1u' },
+        { code: 'Numpad5', label: '5', width: '1u' },
+        { code: 'Numpad6', label: '6', width: '1u' }
+    ],
+
+    // Bottom alpha row (ZXCV)
+    bottomRow: [
+        { code: 'ShiftLeft', label: 'Shift', width: '2-25u', modifier: true },
+        { code: 'KeyZ', label: 'Z', width: '1u' },
+        { code: 'KeyX', label: 'X', width: '1u' },
+        { code: 'KeyC', label: 'C', width: '1u' },
+        { code: 'KeyV', label: 'V', width: '1u' },
+        { code: 'KeyB', label: 'B', width: '1u' },
+        { code: 'KeyN', label: 'N', width: '1u' },
+        { code: 'KeyM', label: 'M', width: '1u' },
+        { code: 'Comma', label: ',', width: '1u' },
+        { code: 'Period', label: '.', width: '1u' },
+        { code: 'Slash', label: '/', width: '1u' },
+        { code: 'ShiftRight', label: 'Shift', width: '2-75u', modifier: true }
+    ],
+
+    // Arrow keys (up)
+    arrowUp: [
+        { code: 'ArrowUp', label: '↑', width: '1u' }
+    ],
+
+    // Numpad row 4
+    numpadRow4: [
+        { code: 'Numpad1', label: '1', width: '1u' },
+        { code: 'Numpad2', label: '2', width: '1u' },
+        { code: 'Numpad3', label: '3', width: '1u' },
+        { code: 'NumpadEnter', label: 'Enter', width: '1u', height: '2u' }
+    ],
+
+    // Control row
+    controlRow: [
+        { code: 'ControlLeft', label: 'Ctrl', width: '1-5u', modifier: true },
+        { code: 'MetaLeft', label: 'Win', width: '1u', modifier: true },
+        { code: 'AltLeft', label: 'Alt', width: '1-5u', modifier: true },
+        { code: 'Space', label: 'Space', width: '6-25u' },
+        { code: 'AltRight', label: 'Alt', width: '1-5u', modifier: true },
+        { code: 'MetaRight', label: 'Win', width: '1u', modifier: true },
+        { code: 'ContextMenu', label: 'Menu', width: '1u' },
+        { code: 'ControlRight', label: 'Ctrl', width: '1-5u', modifier: true }
+    ],
+
+    // Arrow keys (bottom)
+    arrowBottom: [
+        { code: 'ArrowLeft', label: '←', width: '1u' },
+        { code: 'ArrowDown', label: '↓', width: '1u' },
+        { code: 'ArrowRight', label: '→', width: '1u' }
+    ],
+
+    // Numpad row 5
+    numpadRow5: [
+        { code: 'Numpad0', label: '0', width: '2u' },
+        { code: 'NumpadDecimal', label: '.', width: '1u' }
+    ]
+};
+
+/**
+ * Search for keyboard bindings for a specific key
+ * @param {string} scKey - Star Citizen key code (e.g., 'w', 'space', 'lalt')
+ * @returns {Array} - Array of binding objects
+ */
+function searchKeyboardBindings(scKey)
+{
+    if (!currentBindings || !scKey) return [];
+
+    // Match both kb1_key and kb_key formats (defaults use kb_, custom use kb1_)
+    const inputString1 = `kb1_${scKey}`;
+    const inputString2 = `kb_${scKey}`;
+    const allBindings = [];
+
+    for (const actionMap of currentBindings.action_maps)
+    {
+        for (const action of actionMap.actions)
+        {
+            if (!action.bindings || action.bindings.length === 0) continue;
+
+            for (let bindingIndex = 0; bindingIndex < action.bindings.length; bindingIndex++)
+            {
+                const binding = action.bindings[bindingIndex];
+                if (binding.input_type !== 'Keyboard') continue;
+
+                let input = binding.input.toLowerCase();
+                let modifiers = [];
+                let inputWithoutModifier = input;
+
+                // Handle modifier format: kb1_lalt+w or kb_lalt+w
+                const modifierMatch = input.match(/^(kb\d*?)_([a-z]+)\+(.+)$/i);
+                if (modifierMatch)
+                {
+                    modifiers = [modifierMatch[2]];
+                    inputWithoutModifier = `${modifierMatch[1]}_${modifierMatch[3]}`;
+                }
+
+                // Check if this binding matches our key (both kb1_ and kb_ formats)
+                if (inputWithoutModifier === inputString1 || inputWithoutModifier === inputString2)
+                {
+                    let actionLabel = action.ui_label || action.display_name || action.name;
+
+                    if (modifiers.length > 0)
+                    {
+                        actionLabel = modifiers.join('+') + ' + ' + actionLabel;
+                    }
+
+                    if (action.on_hold)
+                    {
+                        actionLabel += ' (Hold)';
+                    }
+
+                    const mapLabel = actionMap.ui_label || actionMap.display_name || actionMap.name;
+
+                    allBindings.push({
+                        action: actionLabel,
+                        actionName: action.name,
+                        actionMapName: actionMap.name,
+                        input: binding.display_name,
+                        inputRaw: binding.input,
+                        bindingIndex: bindingIndex,
+                        actionMap: mapLabel,
+                        isDefault: binding.is_default,
+                        modifiers: modifiers,
+                        multiTap: binding.multi_tap,
+                        activationMode: binding.activation_mode || null
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort: custom bindings first, then defaults
+    allBindings.sort((a, b) =>
+    {
+        if (a.isDefault === b.isDefault) return 0;
+        return a.isDefault ? 1 : -1;
+    });
+
+    // Apply filters
+    let filteredBindings = allBindings;
+
+    if (hideDefaultBindings)
+    {
+        filteredBindings = filteredBindings.filter(b => !b.isDefault);
+    }
+
+    if (modifierFilter !== 'all')
+    {
+        filteredBindings = filteredBindings.filter(b =>
+            b.modifiers && b.modifiers.includes(modifierFilter)
+        );
+    }
+
+    return filteredBindings;
+}
+
+/**
+ * Create a keyboard key element
+ */
+function createKeyElement(keyDef)
+{
+    if (keyDef.spacer)
+    {
+        const spacer = document.createElement('div');
+        spacer.className = 'keyboard-section-gap';
+        spacer.style.width = keyDef.width === '0.5u' ? '10px' : '20px';
+        return spacer;
+    }
+
+    const key = document.createElement('div');
+    key.className = 'keyboard-key';
+    key.dataset.code = keyDef.code;
+
+    // Apply width class
+    if (keyDef.width)
+    {
+        key.classList.add(`key-${keyDef.width}`);
+    }
+
+    // Apply height for special keys
+    if (keyDef.height === '2u')
+    {
+        if (keyDef.code === 'NumpadEnter') key.classList.add('key-numpad-enter');
+        else if (keyDef.code === 'NumpadAdd') key.classList.add('key-numpad-plus');
+    }
+
+    // Mark modifier keys
+    if (keyDef.modifier)
+    {
+        key.classList.add('modifier-key');
+    }
+
+    // Key label
+    const label = document.createElement('div');
+    label.className = 'key-label';
+    label.textContent = keyDef.label;
+    key.appendChild(label);
+
+    // Bindings container
+    const bindingsContainer = document.createElement('div');
+    bindingsContainer.className = 'key-bindings';
+    key.appendChild(bindingsContainer);
+
+    // Click handler
+    key.addEventListener('click', () => onKeyboardKeyClick(key, keyDef));
+
+    // Hover handlers for tooltip
+    key.addEventListener('mouseenter', (e) => showKeyTooltip(e, keyDef));
+    key.addEventListener('mouseleave', hideKeyTooltip);
+
+    return key;
+}
+
+/**
+ * Populate bindings for a key element
+ */
+function updateKeyBindings(keyElement, keyDef)
+{
+    const scKey = SC_KEY_MAP[keyDef.code];
+    if (!scKey) return;
+
+    const bindings = searchKeyboardBindings(scKey);
+    const bindingsContainer = keyElement.querySelector('.key-bindings');
+    bindingsContainer.innerHTML = '';
+
+    // Update key state
+    keyElement.classList.remove('has-binding', 'has-custom-binding');
+
+    if (bindings.length > 0)
+    {
+        keyElement.classList.add('has-binding');
+
+        // Check if any are custom (non-default)
+        if (bindings.some(b => !b.isDefault))
+        {
+            keyElement.classList.add('has-custom-binding');
+        }
+
+        // Show up to 5 bindings on the key (keys are 70px tall now)
+        const maxVisible = 5;
+        const visibleBindings = bindings.slice(0, maxVisible);
+
+        visibleBindings.forEach(binding =>
+        {
+            const item = document.createElement('div');
+            item.className = 'key-binding-item';
+            if (binding.isDefault) item.classList.add('is-default');
+            item.textContent = binding.action;
+            bindingsContainer.appendChild(item);
+        });
+
+        if (bindings.length > maxVisible)
+        {
+            const more = document.createElement('div');
+            more.className = 'key-binding-more';
+            more.textContent = `+${bindings.length - maxVisible} more`;
+            bindingsContainer.appendChild(more);
+        }
+    }
+}
+
+/**
+ * Handle keyboard key click
+ */
+function onKeyboardKeyClick(keyElement, keyDef)
+{
+    const scKey = SC_KEY_MAP[keyDef.code];
+    if (!scKey) return;
+
+    // Update selection
+    if (selectedKeyElement)
+    {
+        selectedKeyElement.classList.remove('selected');
+    }
+    selectedKeyElement = keyElement;
+    keyElement.classList.add('selected');
+
+    // Show binding info panel
+    const buttonId = `kb1_${scKey}`;
+    const bindings = searchKeyboardBindings(scKey);
+
+    // Create a pseudo button data object for the info panel
+    const buttonData = {
+        name: keyDef.label,
+        input: buttonId
+    };
+
+    showBindingInfo(buttonData, bindings);
+}
+
+/**
+ * Show tooltip with full binding info
+ */
+function showKeyTooltip(event, keyDef)
+{
+    const scKey = SC_KEY_MAP[keyDef.code];
+    if (!scKey) return;
+
+    const bindings = searchKeyboardBindings(scKey);
+    if (bindings.length === 0) return;
+
+    // Remove existing tooltip
+    hideKeyTooltip();
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'keyboard-key-tooltip';
+    tooltip.id = 'keyboard-key-tooltip';
+
+    let html = `<div class="tooltip-title">${keyDef.label} (kb1_${scKey})</div>`;
+
+    bindings.forEach(binding =>
+    {
+        html += `<div class="tooltip-binding ${binding.isDefault ? 'is-default' : ''}">${binding.action}</div>`;
+        html += `<div class="tooltip-category">${binding.actionMap}</div>`;
+    });
+
+    tooltip.innerHTML = html;
+    document.body.appendChild(tooltip);
+
+    // Position tooltip
+    const rect = event.target.getBoundingClientRect();
+    tooltip.style.left = `${rect.right + 10}px`;
+    tooltip.style.top = `${rect.top}px`;
+
+    // Keep tooltip in viewport
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (tooltipRect.right > window.innerWidth)
+    {
+        tooltip.style.left = `${rect.left - tooltipRect.width - 10}px`;
+    }
+    if (tooltipRect.bottom > window.innerHeight)
+    {
+        tooltip.style.top = `${window.innerHeight - tooltipRect.height - 10}px`;
+    }
+}
+
+/**
+ * Hide tooltip
+ */
+function hideKeyTooltip()
+{
+    const tooltip = document.getElementById('keyboard-key-tooltip');
+    if (tooltip) tooltip.remove();
+}
+
+/**
+ * Build the keyboard layout
+ */
+function buildKeyboardLayout()
+{
+    if (keyboardContainer)
+    {
+        // Just update bindings
+        refreshKeyboardBindings();
+        return;
+    }
+
+    // Create container
+    keyboardContainer = document.createElement('div');
+    keyboardContainer.className = 'keyboard-view-container';
+    keyboardContainer.id = 'keyboard-view-container';
+
+    // Create inner wrapper for pan/zoom transforms
+    const layoutWrapper = document.createElement('div');
+    layoutWrapper.className = 'keyboard-layout-wrapper';
+    layoutWrapper.id = 'keyboard-layout-wrapper';
+
+    const layout = document.createElement('div');
+    layout.className = 'keyboard-layout';
+
+    // Build the layout
+    // Function row with nav cluster
+    const functionSection = document.createElement('div');
+    functionSection.className = 'keyboard-main-section';
+
+    const funcRow = createKeyboardRow(KEYBOARD_LAYOUT.functionRow, 'function-row');
+    functionSection.appendChild(funcRow);
+
+    // Gap between main and nav
+    const gap1 = document.createElement('div');
+    gap1.className = 'keyboard-section-gap';
+    functionSection.appendChild(gap1);
+
+    const navFuncRow = createKeyboardRow(KEYBOARD_LAYOUT.navFunctionRow);
+    functionSection.appendChild(navFuncRow);
+
+    layout.appendChild(functionSection);
+
+    // Row spacer
+    const spacer1 = document.createElement('div');
+    spacer1.className = 'keyboard-row-spacer';
+    layout.appendChild(spacer1);
+
+    // Number row with nav cluster row 1 and numpad row 1
+    const numberSection = document.createElement('div');
+    numberSection.className = 'keyboard-main-section';
+    numberSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numberRow));
+    numberSection.appendChild(createGap());
+    numberSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.navRow1));
+    numberSection.appendChild(createGap());
+    numberSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numpadRow1));
+    layout.appendChild(numberSection);
+
+    // QWERTY row with nav cluster row 2 and numpad row 2
+    const qwertySection = document.createElement('div');
+    qwertySection.className = 'keyboard-main-section';
+    qwertySection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.qwertyRow));
+    qwertySection.appendChild(createGap());
+    qwertySection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.navRow2));
+    qwertySection.appendChild(createGap());
+    qwertySection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numpadRow2));
+    layout.appendChild(qwertySection);
+
+    // Home row with numpad row 3 (no nav cluster)
+    const homeSection = document.createElement('div');
+    homeSection.className = 'keyboard-main-section';
+    homeSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.homeRow));
+    homeSection.appendChild(createGap());
+    // Empty space where nav cluster would be
+    const emptyNav1 = document.createElement('div');
+    emptyNav1.style.width = '162px'; // 3 keys * 54px
+    homeSection.appendChild(emptyNav1);
+    homeSection.appendChild(createGap());
+    homeSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numpadRow3));
+    layout.appendChild(homeSection);
+
+    // Bottom row with arrow up and numpad row 4
+    const bottomSection = document.createElement('div');
+    bottomSection.className = 'keyboard-main-section';
+    bottomSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.bottomRow));
+    bottomSection.appendChild(createGap());
+    // Arrow up centered
+    const arrowUpContainer = document.createElement('div');
+    arrowUpContainer.style.display = 'flex';
+    arrowUpContainer.style.justifyContent = 'center';
+    arrowUpContainer.style.width = '162px';
+    arrowUpContainer.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.arrowUp));
+    bottomSection.appendChild(arrowUpContainer);
+    bottomSection.appendChild(createGap());
+    bottomSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numpadRow4));
+    layout.appendChild(bottomSection);
+
+    // Control row with arrow bottom and numpad row 5
+    const controlSection = document.createElement('div');
+    controlSection.className = 'keyboard-main-section';
+    controlSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.controlRow));
+    controlSection.appendChild(createGap());
+    controlSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.arrowBottom));
+    controlSection.appendChild(createGap());
+    controlSection.appendChild(createKeyboardRow(KEYBOARD_LAYOUT.numpadRow5));
+    layout.appendChild(controlSection);
+
+    layoutWrapper.appendChild(layout);
+    keyboardContainer.appendChild(layoutWrapper);
+
+    // Add pan/zoom event listeners
+    keyboardContainer.addEventListener('wheel', onKeyboardWheel, { passive: false });
+    keyboardContainer.addEventListener('mousedown', onKeyboardMouseDown);
+    keyboardContainer.addEventListener('mousemove', onKeyboardMouseMove);
+    keyboardContainer.addEventListener('mouseup', onKeyboardMouseUp);
+    keyboardContainer.addEventListener('mouseleave', onKeyboardMouseUp);
+    keyboardContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+    keyboardContainer.addEventListener('dblclick', onKeyboardDblClick);
+
+    // Append to joystick display area
+    const joystickDisplay = document.querySelector('.joystick-display');
+    if (joystickDisplay)
+    {
+        joystickDisplay.appendChild(keyboardContainer);
+    }
+
+    // Apply initial transform
+    updateKeyboardTransform();
+}
+
+/**
+ * Create a keyboard row
+ */
+function createKeyboardRow(keys, extraClass = '')
+{
+    const row = document.createElement('div');
+    row.className = 'keyboard-row';
+    if (extraClass) row.classList.add(extraClass);
+
+    keys.forEach(keyDef =>
+    {
+        row.appendChild(createKeyElement(keyDef));
+    });
+
+    return row;
+}
+
+/**
+ * Create a gap element
+ */
+function createGap()
+{
+    const gap = document.createElement('div');
+    gap.className = 'keyboard-section-gap';
+    return gap;
+}
+
+/**
+ * Refresh all keyboard bindings
+ */
+function refreshKeyboardBindings()
+{
+    if (!keyboardContainer) return;
+
+    const allKeys = keyboardContainer.querySelectorAll('.keyboard-key');
+    allKeys.forEach(keyElement =>
+    {
+        const code = keyElement.dataset.code;
+        if (!code) return;
+
+        // Find the key definition
+        const keyDef = findKeyDef(code);
+        if (keyDef)
+        {
+            updateKeyBindings(keyElement, keyDef);
+        }
+    });
+}
+
+/**
+ * Find key definition by code
+ */
+function findKeyDef(code)
+{
+    for (const rowName of Object.keys(KEYBOARD_LAYOUT))
+    {
+        const row = KEYBOARD_LAYOUT[rowName];
+        const found = row.find(k => k.code === code);
+        if (found) return found;
+    }
+    return null;
+}
+
+/**
+ * Toggle keyboard view visibility
+ */
+function toggleKeyboardView()
+{
+    keyboardViewVisible = !keyboardViewVisible;
+
+    const toggleBtn = document.getElementById('keyboard-view-toggle');
+    const welcomeScreen = document.getElementById('welcome-screen-visual');
+    const canvasContainer = document.getElementById('viewer-canvas-container');
+    const toolbar = document.getElementById('modifier-toolbar');
+
+    if (keyboardViewVisible)
+    {
+        // Build/update keyboard
+        buildKeyboardLayout();
+        refreshKeyboardBindings();
+        keyboardContainer.classList.add('visible');
+
+        // Hide canvas container and welcome screen
+        if (canvasContainer) canvasContainer.style.display = 'none';
+        if (welcomeScreen) welcomeScreen.style.display = 'none';
+
+        // Update button state
+        if (toggleBtn) toggleBtn.classList.add('active');
+
+        // Show modifier toolbar
+        if (toolbar) toolbar.style.display = 'flex';
+    }
+    else
+    {
+        // Hide keyboard
+        if (keyboardContainer) keyboardContainer.classList.remove('visible');
+
+        // Restore previous view state - show canvas if template is loaded, otherwise welcome screen
+        const template = getCurrentTemplate();
+        if (template && window.viewerImage)
+        {
+            if (canvasContainer) canvasContainer.style.display = 'flex';
+            if (welcomeScreen) welcomeScreen.style.display = 'none';
+        }
+        else
+        {
+            if (canvasContainer) canvasContainer.style.display = 'none';
+            if (welcomeScreen) welcomeScreen.style.display = 'flex';
+            // Hide modifier toolbar if no template
+            if (toolbar) toolbar.style.display = 'none';
+        }
+
+        // Update button state
+        if (toggleBtn) toggleBtn.classList.remove('active');
+
+        // Hide binding info panel
+        hideBindingInfo();
+        hideKeyTooltip();
+
+        // Clear selection
+        if (selectedKeyElement)
+        {
+            selectedKeyElement.classList.remove('selected');
+            selectedKeyElement = null;
+        }
+    }
+
+    // Save state
+    localStorage.setItem('keyboardViewVisible', keyboardViewVisible.toString());
+}
+
+/**
+ * Initialize keyboard view button listener
+ */
+function initKeyboardView()
+{
+    const toggleBtn = document.getElementById('keyboard-view-toggle');
+    if (toggleBtn)
+    {
+        toggleBtn.addEventListener('click', toggleKeyboardView);
+    }
+
+    // Don't auto-restore keyboard view state on page load
+    // It can cause layout issues if bindings aren't loaded yet
+    // User can click the button to show keyboard when ready
+}
+
+/**
+ * Update keyboard transform for pan/zoom
+ */
+function updateKeyboardTransform()
+{
+    const wrapper = document.getElementById('keyboard-layout-wrapper');
+    if (wrapper)
+    {
+        wrapper.style.transform = `translate(${keyboardPan.x}px, ${keyboardPan.y}px) scale(${keyboardZoom})`;
+    }
+}
+
+/**
+ * Handle mouse wheel for keyboard zoom
+ */
+function onKeyboardWheel(e)
+{
+    e.preventDefault();
+
+    const zoomSpeed = 0.001;
+    const minZoom = 0.3;
+    const maxZoom = 3.0;
+
+    // Calculate new zoom
+    const delta = -e.deltaY * zoomSpeed;
+    const newZoom = Math.min(maxZoom, Math.max(minZoom, keyboardZoom + delta));
+
+    // Get mouse position relative to container
+    const rect = keyboardContainer.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Adjust pan to zoom toward mouse position
+    const zoomRatio = newZoom / keyboardZoom;
+    keyboardPan.x = mouseX - (mouseX - keyboardPan.x) * zoomRatio;
+    keyboardPan.y = mouseY - (mouseY - keyboardPan.y) * zoomRatio;
+
+    keyboardZoom = newZoom;
+    updateKeyboardTransform();
+}
+
+/**
+ * Handle mouse down for keyboard panning
+ */
+function onKeyboardMouseDown(e)
+{
+    // Middle mouse button or right mouse button for panning
+    if (e.button === 1 || e.button === 2)
+    {
+        e.preventDefault();
+        keyboardIsPanning = true;
+        keyboardLastPanPos = { x: e.clientX, y: e.clientY };
+        keyboardContainer.style.cursor = 'grabbing';
+    }
+}
+
+/**
+ * Handle mouse move for keyboard panning
+ */
+function onKeyboardMouseMove(e)
+{
+    if (keyboardIsPanning)
+    {
+        const dx = e.clientX - keyboardLastPanPos.x;
+        const dy = e.clientY - keyboardLastPanPos.y;
+        keyboardPan.x += dx;
+        keyboardPan.y += dy;
+        keyboardLastPanPos = { x: e.clientX, y: e.clientY };
+        updateKeyboardTransform();
+    }
+}
+
+/**
+ * Handle mouse up for keyboard panning
+ */
+function onKeyboardMouseUp(e)
+{
+    if (keyboardIsPanning)
+    {
+        keyboardIsPanning = false;
+        keyboardContainer.style.cursor = '';
+    }
+}
+
+/**
+ * Handle double-click to reset keyboard view
+ */
+function onKeyboardDblClick(e)
+{
+    // Only reset if clicking on the container background, not on a key
+    if (e.target === keyboardContainer || e.target.classList.contains('keyboard-layout-wrapper'))
+    {
+        resetKeyboardView();
+    }
+}
+
+/**
+ * Reset keyboard view to default zoom/pan
+ */
+function resetKeyboardView()
+{
+    keyboardZoom = 1.0;
+    keyboardPan = { x: 0, y: 0 };
+    updateKeyboardTransform();
+}
+
+// Initialize on DOM ready
+if (document.readyState === 'loading')
+{
+    document.addEventListener('DOMContentLoaded', initKeyboardView);
+}
+else
+{
+    initKeyboardView();
+}
+
+// Export refresh function for use when bindings change
+window.refreshKeyboardView = function ()
+{
+    if (keyboardViewVisible && keyboardContainer)
+    {
+        refreshKeyboardBindings();
+    }
+};
+
+// Export reset function
+window.resetKeyboardView = resetKeyboardView;

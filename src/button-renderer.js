@@ -190,11 +190,19 @@ export function drawButtonBox(ctx, x, y, title, contentLines = [], compact = fal
         mutedColor = '#666',
         actionColor = null,
         bindingsData = null,
-        isTemplateEditor = false
+        isTemplateEditor = false,
+        // Allow overriding dimensions and font sizes
+        frameWidth = ButtonFrameWidth,
+        frameHeight = ButtonFrameHeight,
+        hatFrameWidth = HatFrameWidth,
+        hatFrameHeight = HatFrameHeight,
+        numLines = NumLines,
+        titleFontSize = null,
+        contentFontSize = null
     } = options;
 
-    const width = compact ? HatFrameWidth : ButtonFrameWidth;
-    const height = ButtonFrameHeight;
+    const width = compact ? hatFrameWidth : frameWidth;
+    const height = compact ? hatFrameHeight : frameHeight;
 
     const boxX = x - width / 2;
     const boxY = y - height / 2;
@@ -230,7 +238,11 @@ export function drawButtonBox(ctx, x, y, title, contentLines = [], compact = fal
         subtleColor,
         mutedColor,
         actionColor,
-        isTemplateEditor
+        isTemplateEditor,
+        // Pass through the override values
+        numLines,
+        titleFontSize,
+        contentFontSize
     });
 }
 
@@ -255,16 +267,21 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         subtleColor = '#999',
         mutedColor = '#666',
         actionColor = null,
-        isTemplateEditor = false
+        isTemplateEditor = false,
+        // Allow overriding display settings
+        numLines = NumLines,
+        titleFontSize = null,
+        contentFontSize = null
     } = colors;
 
     // Calculate text layout metrics
     const padding = 4;
     const contentWidth = boxWidth - (padding * 2);
     const lineHeight = compact ? TextLineHeightCompact : TextLineHeight;
-    const titleFontSize = compact ? TitleFontSizeCompact : TitleFontSize;
-    const contentFontSize = compact ? ContentFontSizeCompact : ContentFontSize;
-    const actionFontSize = ActionTextSize;
+    const titleFont = titleFontSize || (compact ? TitleFontSizeCompact : TitleFontSize);
+    const contentFont = contentFontSize || (compact ? ContentFontSizeCompact : ContentFontSize);
+    // Use contentFont for action text too if contentFontSize is provided (for viewer config)
+    const actionFont = contentFontSize || ActionTextSize;
     const countFontSize = ActionTextSize;
     const titleSpacing = compact ? 14 : 18;
 
@@ -289,7 +306,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
 
     // Draw title at top
     ctx.fillStyle = titleColor;
-    ctx.font = `${titleFontSize} "Segoe UI", sans-serif`;
+    ctx.font = `${titleFont} "Segoe UI", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     // Move title down 4px in template editor mode for better spacing
@@ -306,7 +323,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     if (!contentLines || contentLines.length === 0)
     {
         ctx.fillStyle = mutedColor;
-        ctx.font = `italic ${contentFontSize} "Segoe UI", sans-serif`;
+        ctx.font = `italic ${contentFont} "Segoe UI", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('(unbound)', x, y + 2);
@@ -314,16 +331,14 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     }
 
     // Determine how many lines we can show
-    // For non-compact boxes, limit to NumLines; for compact, use available space
-    const maxDisplayLines = compact ? maxLinesAvailable : NumLines;
+    // For non-compact boxes, limit to numLines; for compact, use available space
+    const maxDisplayLines = compact ? maxLinesAvailable : numLines;
     const linesToShow = Math.min(maxDisplayLines, contentLines.length);
     const showMoreIndicator = contentLines.length > linesToShow;
 
     // Calculate starting Y position for content (vertically center the content area)
-    // Always reserve space for "+x more" indicator when at maximum display lines
-    // This keeps spacing consistent for all boxes at the maximum capacity, regardless of overflow
-    const isAtMaxCapacity = linesToShow === maxDisplayLines;
-    const actualLines = isAtMaxCapacity ? linesToShow - 1 : linesToShow;
+    // Show the full number of lines requested, indicator is additional
+    const actualLines = linesToShow;
 
     // Calculate total height of all lines accounting for variable font sizes
     let totalTextHeight = 0;
@@ -331,7 +346,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     {
         const line = contentLines[i];
         const isLeftAligned = line.startsWith('[action]') || line.startsWith('[muted]');
-        const fontSize = isLeftAligned ? actionFontSize : contentFontSize;
+        const fontSize = isLeftAligned ? actionFont : contentFont;
         const fontSizeNum = parseInt(fontSize);
         totalTextHeight += fontSizeNum + 3; // font size + 3px padding
     }
@@ -374,8 +389,8 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
             color = contentColor;
         }
 
-        // Use ActionTextSize for action and muted text, contentFontSize for others
-        const fontSize = isLeftAligned ? actionFontSize : contentFontSize;
+        // Use actionFont for action and muted text, contentFont for others
+        const fontSize = isLeftAligned ? actionFont : contentFont;
         ctx.fillStyle = color;
         ctx.font = `${fontSize} "Segoe UI", sans-serif`;
         ctx.textBaseline = 'middle';
@@ -390,7 +405,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         {
             const prevLine = contentLines[j];
             let prevIsLeftAligned = prevLine.startsWith('[action]') || prevLine.startsWith('[muted]');
-            const prevFontSize = prevIsLeftAligned ? actionFontSize : contentFontSize;
+            const prevFontSize = prevIsLeftAligned ? actionFont : contentFont;
             const prevFontSizeNum = parseInt(prevFontSize);
             lineY += prevFontSizeNum + 3;
         }
@@ -412,7 +427,9 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         const bottomPadding = 3;
         const moreIndicatorY = y + (boxHeight / 2) - bottomPadding;
 
-        ctx.fillStyle = '#aaa';
+        // Use actionColor for the indicator if provided (when greenDefaults is enabled)
+        const moreIndicatorColor = actionColor || '#aaa';
+        ctx.fillStyle = moreIndicatorColor;
         ctx.font = `${countFontSize} "Segoe UI", sans-serif`;
         ctx.textBaseline = 'bottom';
 
@@ -428,7 +445,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         ctx.fill();
 
         // Draw text - left-aligned
-        ctx.fillStyle = '#aaa';
+        ctx.fillStyle = moreIndicatorColor;
         ctx.textAlign = 'left';
         ctx.fillText(countText, bgX + bgPadding, moreIndicatorY);
     }
@@ -575,17 +592,17 @@ export function drawSingleButtonLabel(ctx, button, alpha, isTemplateEditor = fal
  * Calculate hat positions for a 4-way hat switch
  * Returns an object with positions for each direction
  */
-export function getHat4WayPositions(centerX, centerY, hasPush = false)
+export function getHat4WayPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    let offsetY = (HatFrameHeight / 2) + (HatSpacing * 2) + (HatSpacing / 2) + (HatFrameHeight / 2) + HatSpacing / 2;
-    if (!hasPush) offsetY -= HatFrameHeight / 2 + HatSpacing;
+    let offsetY = (height / 2) + (HatSpacing * 2) + (HatSpacing / 2) + (height / 2) + HatSpacing / 2;
+    if (!hasPush) offsetY -= height / 2 + HatSpacing;
     else offsetY += HatSpacing;
 
     return {
         'up': { x: centerX, y: centerY - offsetY },
         'down': { x: centerX, y: centerY + offsetY },
-        'left': { x: centerX - HatFrameWidth - HatSpacing, y: centerY },
-        'right': { x: centerX + HatFrameWidth + HatSpacing, y: centerY },
+        'left': { x: centerX - width - HatSpacing, y: centerY },
+        'right': { x: centerX + width + HatSpacing, y: centerY },
         'push': { x: centerX, y: centerY }
     };
 }
@@ -594,15 +611,15 @@ export function getHat4WayPositions(centerX, centerY, hasPush = false)
  * Calculate hat positions for a 2-way vertical hat switch (Up/Down)
  * Returns an object with positions for up and down directions
  */
-export function getHat2WayVerticalPositions(centerX, centerY, hasPush = false)
+export function getHat2WayVerticalPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
     // For vertical: up and down boxes positioned with spacing between them
-    const verticalOffset = HatFrameHeight / 2 + HatSpacing * 2;
+    const verticalOffset = height / 2 + HatSpacing * 2;
 
     return {
         'up': { x: centerX, y: centerY - verticalOffset },
         'down': { x: centerX, y: centerY + verticalOffset },
-        'push': { x: centerX, y: centerY + HatFrameHeight + HatSpacing * 2 }
+        'push': { x: centerX, y: centerY + height + HatSpacing * 2 }
     };
 }
 
@@ -610,16 +627,16 @@ export function getHat2WayVerticalPositions(centerX, centerY, hasPush = false)
  * Calculate hat positions for a 2-way horizontal hat switch (Left/Right)
  * Returns an object with positions for left and right directions
  */
-export function getHat2WayHorizontalPositions(centerX, centerY, hasPush = false)
+export function getHat2WayHorizontalPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
     // For horizontal: left and right boxes touching with spacing between
     // If there's a push button, it goes below at centerY
-    const horizontalOffset = HatFrameWidth / 2 + HatSpacing / 2;
+    const horizontalOffset = width / 2 + HatSpacing / 2;
 
     return {
         'left': { x: centerX - horizontalOffset, y: centerY },
         'right': { x: centerX + horizontalOffset, y: centerY },
-        'push': { x: centerX, y: centerY + HatFrameHeight + HatSpacing }
+        'push': { x: centerX, y: centerY + height + HatSpacing }
     };
 }
 
@@ -718,7 +735,13 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
         onClickableBox = null,
         buttonDataForDirection = null,
         bindingsByDirection = null,
-        isTemplateEditor = false
+        isTemplateEditor = false,
+        // Allow overriding dimensions and font sizes
+        hatFrameWidth = HatFrameWidth,
+        hatFrameHeight = HatFrameHeight,
+        numLines = NumLines,
+        titleFontSize = null,
+        contentFontSize = null
     } = options;
 
     ctx.save();
@@ -728,19 +751,19 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
     const hasPush = hat.inputs && hat.inputs['push'];
 
     // Calculate all positions using centralized helper
-    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
     // Calculate spacing for hat name position
     // When there's a push button, the up direction is pushed down further, so we need more spacing above
-    let offsetY = HatFrameHeight * 2;
-    if (!hasPush) offsetY -= HatFrameHeight / 2 + HatSpacing;
+    let offsetY = hatFrameHeight * 2;
+    if (!hasPush) offsetY -= hatFrameHeight / 2 + HatSpacing;
 
     const titleGap = -8;
     const titleY = hat.labelPos.y - offsetY - titleGap;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
-    ctx.font = `${HatTitleFontSize} "Segoe UI", sans-serif`;
+    ctx.font = `${titleFontSize || HatTitleFontSize} "Segoe UI", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const simplifiedName = simplifyButtonName(hat.name || 'Hat');
@@ -790,7 +813,13 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
                 subtleColor: colors.subtleColor || '#999',
                 mutedColor: colors.mutedColor || '#666',
                 actionColor: colors.actionColor || null,
-                bindingsData: actualBindings || contentLines
+                bindingsData: actualBindings || contentLines,
+                // Pass through configuration overrides
+                hatFrameWidth,
+                hatFrameHeight,
+                numLines,
+                titleFontSize,
+                contentFontSize
             };
 
             drawButtonBox(ctx, pos.x, pos.y, label, contentLines, true, boxOptions);
@@ -847,24 +876,30 @@ export function drawHat2WayVerticalBoxes(ctx, hat, options = {})
         onClickableBox = null,
         buttonDataForDirection = null,
         bindingsByDirection = null,
-        isTemplateEditor = false
+        isTemplateEditor = false,
+        // Allow overriding dimensions and font sizes
+        hatFrameWidth = HatFrameWidth,
+        hatFrameHeight = HatFrameHeight,
+        numLines = NumLines,
+        titleFontSize = null,
+        contentFontSize = null
     } = options;
 
     ctx.save();
     ctx.globalAlpha = alpha;
 
     const hasPush = hat.inputs && hat.inputs['push'];
-    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
-    let offsetY = HatFrameHeight * 2;
-    if (!hasPush) offsetY -= HatFrameHeight / 2 + HatSpacing;
+    let offsetY = hatFrameHeight * 2;
+    if (!hasPush) offsetY -= hatFrameHeight / 2 + HatSpacing;
 
     const titleGap = -8;
     const titleY = hat.labelPos.y - offsetY - titleGap;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
-    ctx.font = `${HatTitleFontSize} "Segoe UI", sans-serif`;
+    ctx.font = `${titleFontSize || HatTitleFontSize} "Segoe UI", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const simplifiedName = simplifyButtonName(hat.name || 'Hat');
@@ -933,21 +968,27 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
         onClickableBox = null,
         buttonDataForDirection = null,
         bindingsByDirection = null,
-        isTemplateEditor = false
+        isTemplateEditor = false,
+        // Allow overriding dimensions and font sizes
+        hatFrameWidth = HatFrameWidth,
+        hatFrameHeight = HatFrameHeight,
+        numLines = NumLines,
+        titleFontSize = null,
+        contentFontSize = null
     } = options;
 
     ctx.save();
     ctx.globalAlpha = alpha;
 
     const hasPush = hat.inputs && hat.inputs['push'];
-    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
     const titleGap = -8;
-    const titleY = hat.labelPos.y - HatFrameHeight - HatSpacing - titleGap;
+    const titleY = hat.labelPos.y - hatFrameHeight - HatSpacing - titleGap;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
-    ctx.font = `${HatTitleFontSize} "Segoe UI", sans-serif`;
+    ctx.font = `${titleFontSize || HatTitleFontSize} "Segoe UI", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const simplifiedName = simplifyButtonName(hat.name || 'Hat');
@@ -991,7 +1032,13 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
                 subtleColor: colors.subtleColor || '#999',
                 mutedColor: colors.mutedColor || '#666',
                 actionColor: colors.actionColor || null,
-                bindingsData: actualBindings || contentLines
+                bindingsData: actualBindings || contentLines,
+                // Pass through configuration overrides
+                hatFrameWidth,
+                hatFrameHeight,
+                numLines,
+                titleFontSize,
+                contentFontSize
             };
             drawButtonBox(ctx, pos.x, pos.y, label, contentLines, true, boxOptions);
         }

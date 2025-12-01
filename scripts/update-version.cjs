@@ -32,8 +32,8 @@ const FILES_TO_UPDATE = [
     },
     {
         path: 'src/index.html',
-        regex: /<h2>🎉 What's New in v(\d+\.\d+\.\d+)<\/h2>/,
-        replacement: '<h2>🎉 What\'s New in vNEW_VERSION</h2>'
+        regex: /<button class="whats-new-version-toggle" data-version="(\d+\.\d+\.\d+)">\s*<span class="version-toggle-arrow">▼<\/span>\s*<span class="version-toggle-label">v(\d+\.\d+\.\d+)<\/span>/,
+        replacement: '<button class="whats-new-version-toggle" data-version="NEW_VERSION">\n            <span class="version-toggle-arrow">▼</span>\n            <span class="version-toggle-label">vNEW_VERSION</span>'
     }
 ];
 

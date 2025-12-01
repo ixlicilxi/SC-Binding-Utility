@@ -1,0 +1,650 @@
+/* ============================================================================
+   CONTROLS EDITOR STYLES
+   ============================================================================ */
+
+/* Main Container */
+.controls-editor-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 1rem;
+    gap: 1rem;
+    overflow: hidden;
+}
+
+/* Device Type Tabs */
+.controls-device-tabs {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: var(--bg-medium);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, var(--bg-lighter));
+}
+
+.controls-device-tab {
+    padding: 0.75rem 1.5rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.controls-device-tab:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+}
+
+.controls-device-tab.active {
+    background: var(--accent-primary);
+    color: var(--text-inverse);
+    border-color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.controls-device-tab .tab-icon {
+    font-size: 1.2rem;
+}
+
+/* Main Content Area */
+.controls-main-content {
+    display: flex;
+    flex: 1;
+    gap: 1rem;
+    overflow: hidden;
+}
+
+/* Tree Navigation Sidebar */
+.controls-tree-sidebar {
+    width: 300px;
+    min-width: 250px;
+    background: var(--bg-medium);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, var(--bg-lighter));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.controls-tree-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--bg-lighter);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.controls-tree-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.controls-tree-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+/* Tree Items */
+.controls-tree-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.controls-tree-node {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    gap: 0.5rem;
+}
+
+.controls-tree-node:hover {
+    background: var(--bg-light);
+}
+
+.controls-tree-node.selected {
+    background: var(--accent-subtle);
+    border-left: 3px solid var(--accent-primary);
+}
+
+.controls-tree-node.has-children {
+    font-weight: 500;
+}
+
+.controls-tree-expand {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease;
+}
+
+.controls-tree-expand.expanded {
+    transform: rotate(90deg);
+}
+
+.controls-tree-icon {
+    font-size: 1rem;
+}
+
+.controls-tree-label {
+    flex: 1;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.controls-tree-children {
+    padding-left: 1.5rem;
+}
+
+.controls-tree-children.collapsed {
+    display: none;
+}
+
+/* Settings/Indicators */
+.controls-tree-settings {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.controls-tree-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    background: var(--bg-lighter);
+    color: var(--text-secondary);
+}
+
+.controls-tree-badge.has-invert {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.controls-tree-badge.has-curve {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+}
+
+/* Settings Panel */
+.controls-settings-panel {
+    flex: 1;
+    background: var(--bg-medium);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, var(--bg-lighter));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.controls-settings-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--bg-lighter);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.controls-settings-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.controls-settings-path {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.controls-settings-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+}
+
+/* Empty State */
+.controls-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 2rem;
+}
+
+.controls-empty-state .empty-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.controls-empty-state h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+}
+
+.controls-empty-state p {
+    margin: 0;
+    max-width: 400px;
+}
+
+/* Settings Sections */
+.controls-setting-section {
+    margin-bottom: 2rem;
+}
+
+.controls-setting-section:last-child {
+    margin-bottom: 0;
+}
+
+.controls-setting-section h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--bg-lighter);
+}
+
+/* Invert Toggle */
+.controls-invert-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    background: var(--bg-dark);
+    border-radius: 6px;
+    border: 1px solid var(--bg-lighter);
+}
+
+.controls-invert-toggle .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.controls-invert-toggle .toggle-label {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.controls-invert-toggle .toggle-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    width: 50px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-lighter);
+    transition: 0.3s;
+    border-radius: 26px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--text-primary);
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked+.toggle-slider {
+    background-color: var(--accent-primary);
+}
+
+.toggle-switch input:checked+.toggle-slider:before {
+    transform: translateX(24px);
+}
+
+/* Curve Editor */
+.controls-curve-editor {
+    background: var(--bg-dark);
+    border-radius: 8px;
+    border: 1px solid var(--bg-lighter);
+    padding: 1.5rem;
+}
+
+.controls-curve-canvas-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 1;
+    max-height: 300px;
+    background: var(--bg-darkest);
+    border-radius: 6px;
+    border: 1px solid var(--bg-lighter);
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.controls-curve-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+/* Curve Points Table */
+.controls-curve-points {
+    margin-top: 1rem;
+}
+
+.controls-curve-points-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.controls-curve-points-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.controls-curve-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.controls-curve-table th,
+.controls-curve-table td {
+    padding: 0.5rem;
+    text-align: center;
+    border: 1px solid var(--bg-lighter);
+}
+
+.controls-curve-table th {
+    background: var(--bg-medium);
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.controls-curve-table td {
+    background: var(--bg-dark);
+}
+
+.controls-curve-table input {
+    width: 60px;
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: inherit;
+    text-align: center;
+}
+
+.controls-curve-table input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+/* Curve Presets */
+.controls-curve-presets {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--bg-lighter);
+}
+
+.controls-curve-preset-btn {
+    padding: 0.5rem 1rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.controls-curve-preset-btn:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+/* Exponent Slider */
+.controls-exponent-setting {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-dark);
+    border-radius: 6px;
+    border: 1px solid var(--bg-lighter);
+    margin-top: 1rem;
+}
+
+.controls-exponent-setting label {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.controls-exponent-setting input[type="range"] {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-lighter);
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.controls-exponent-setting input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.controls-exponent-value {
+    min-width: 50px;
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: 'Consolas', 'Courier New', monospace;
+    text-align: center;
+}
+
+/* Inherited Settings Notice */
+.controls-inherited-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+}
+
+.controls-inherited-notice .notice-icon {
+    font-size: 1.2rem;
+}
+
+.controls-inherited-notice .notice-text {
+    flex: 1;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.controls-inherited-notice .notice-text strong {
+    color: #60a5fa;
+}
+
+/* Reset/Apply Buttons */
+.controls-action-buttons {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--bg-lighter);
+}
+
+/* Info tooltips */
+.controls-info-tooltip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--bg-lighter);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    cursor: help;
+    margin-left: 0.5rem;
+}
+
+/* Loading State */
+.controls-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-secondary);
+}
+
+.controls-loading::after {
+    content: '';
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--bg-lighter);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: controls-spin 1s linear infinite;
+    margin-left: 1rem;
+}
+
+@keyframes controls-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Save indicator */
+.controls-save-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 4px;
+    color: var(--accent-primary);
+    font-size: 0.85rem;
+}
+
+.controls-save-indicator.unsaved {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+}
+
+/* Scrollbar styling for tree */
+.controls-tree-content::-webkit-scrollbar,
+.controls-settings-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.controls-tree-content::-webkit-scrollbar-track,
+.controls-settings-content::-webkit-scrollbar-track {
+    background: var(--bg-dark);
+}
+
+.controls-tree-content::-webkit-scrollbar-thumb,
+.controls-settings-content::-webkit-scrollbar-thumb {
+    background: var(--bg-lighter);
+    border-radius: 4px;
+}
+
+.controls-tree-content::-webkit-scrollbar-thumb:hover,
+.controls-settings-content::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* Instance selector for joystick */
+.controls-instance-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-dark);
+    border-radius: 6px;
+    border: 1px solid var(--bg-lighter);
+    margin-bottom: 1rem;
+}
+
+.controls-instance-selector label {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.controls-instance-selector select {
+    padding: 0.5rem 1rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.controls-instance-selector select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}

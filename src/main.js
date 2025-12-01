@@ -206,7 +206,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.9.0';
+  const CURRENT_VERSION = '0.10.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -221,7 +221,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.9.0';
+  const CURRENT_VERSION = '0.10.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -255,6 +255,53 @@ function showWhatsNewModal()
 
   // Focus the close button
   setTimeout(() => closeBtn.focus(), 100);
+
+  // Setup version toggle handlers
+  setupWhatsNewToggles();
+}
+
+function setupWhatsNewToggles()
+{
+  const toggleButtons = document.querySelectorAll('.whats-new-version-toggle');
+
+  toggleButtons.forEach(button =>
+  {
+    // Remove any existing listeners to avoid duplicates
+    const newButton = button.cloneNode(true);
+    button.parentNode.replaceChild(newButton, button);
+
+    newButton.addEventListener('click', (e) =>
+    {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const version = newButton.dataset.version;
+      // Convert 0.9.1 to 091, 0.9.0 to 090
+      const contentId = `whats-new-${version.replace(/\./g, '')}`;
+      const content = document.getElementById(contentId);
+      const arrow = newButton.querySelector('.version-toggle-arrow');
+
+      if (!content || !arrow)
+      {
+        console.warn(`Could not find content for version ${version}, id: ${contentId}`);
+        return;
+      }
+
+      const isHidden = content.style.display === 'none';
+
+      // Toggle display
+      content.style.display = isHidden ? 'block' : 'none';
+
+      // Animate arrow - rotate 90 degrees when closing
+      if (isHidden)
+      {
+        arrow.style.transform = 'rotate(0deg)';
+      } else
+      {
+        arrow.style.transform = 'rotate(-90deg)';
+      }
+    });
+  });
 }
 
 // Make showWhatsNewModal globally available for testing
@@ -269,16 +316,38 @@ window.addEventListener("DOMContentLoaded", async () =>
     window.loadDevicePrefixMappings();
   }
 
+  // Build device UUID mapping early (before keybindings are loaded)
+  if (window.buildDeviceUuidMapping)
+  {
+    await window.buildDeviceUuidMapping();
+  }
+
   initializeEventListeners();
   initializeTabSystem();
   initializeWhatsNewModal();
   initializeFontSizeScaling();
 
+  // Initialize tooltip settings from localStorage
+  const savedTooltipSetting = localStorage.getItem('tooltips-enabled');
+  // Default to enabled (true) if not set
+  Tooltip.enabled = savedTooltipSetting !== 'false';
+
+  const tooltipsToggle = document.getElementById('tooltips-toggle');
+  if (tooltipsToggle)
+  {
+    tooltipsToggle.checked = Tooltip.enabled;
+    tooltipsToggle.addEventListener('change', () =>
+    {
+      Tooltip.enabled = tooltipsToggle.checked;
+      localStorage.setItem('tooltips-enabled', tooltipsToggle.checked);
+    });
+  }
+
   // Initialize tooltips
   const searchInput = document.getElementById('search-input');
   if (searchInput)
   {
-    new Tooltip(searchInput, 'Type to filter actions by name. Supports partial matches. Use | to separate multiple terms.');
+    new Tooltip(searchInput, 'Type to filter actions by name. Supports partial matches. Use | for OR (any term), use + for AND (all terms).');
   }
 
   // Main header tabs
@@ -311,7 +380,13 @@ window.addEventListener("DOMContentLoaded", async () =>
   if (configureJoystickBtn) { new Tooltip(configureJoystickBtn, 'Open Device Manager to configure device IDs and test inputs'); }
 
   const clearSCBindsBtn = document.getElementById('clear-sc-binds-btn');
-  if (clearSCBindsBtn) { new Tooltip(clearSCBindsBtn, 'Generate a profile to unbind all devices'); }
+  if (clearSCBindsBtn) { new Tooltip(clearSCBindsBtn, 'Generate a keybinding file that forcefully unbinds all actions in-game'); }
+
+  const swapJoystickPrefixesBtn = document.getElementById('swap-joystick-prefixes-btn');
+  if (swapJoystickPrefixesBtn) { new Tooltip(swapJoystickPrefixesBtn, 'Swap JS1 and JS2 prefixes on all joystick bindings - useful when Star Citizen flips device order'); }
+
+  const restoreDefaultsBtn = document.getElementById('restore-defaults-btn');
+  if (restoreDefaultsBtn) { new Tooltip(restoreDefaultsBtn, 'Generate a profile with only default bindings'); }
 
   // Bindings sub-nav tooltips
   const listViewBtn = document.getElementById('bindings-view-list');
@@ -729,6 +804,14 @@ function switchTab(tabName)
       window.initializeDeviceManager();
     }
   }
+  else if (tabName === 'controls')
+  {
+    // Initialize controls editor if needed
+    if (window.initializeControlsEditor)
+    {
+      window.initializeControlsEditor();
+    }
+  }
 }
 
 function initializeEventListeners()
@@ -877,22 +960,33 @@ function initializeEventListeners()
         // Copy to clipboard
         await navigator.clipboard.writeText(command);
 
-        // Show temporary success message
-        const originalText = copyCommandBtn.textContent;
-        copyCommandBtn.textContent = '✓ Copied!';
-        copyCommandBtn.style.opacity = '0.8';
-
-        setTimeout(() =>
+        // Show toast notification
+        if (window.toast)
         {
-          copyCommandBtn.textContent = originalText;
-          copyCommandBtn.style.opacity = '1';
-        }, 2000);
+          window.toast.success(`Command copied: ${command}`);
+        } else
+        {
+          // Fallback: Show temporary success message on button
+          const originalText = copyCommandBtn.textContent;
+          copyCommandBtn.textContent = '✓ Copied!';
+          copyCommandBtn.style.opacity = '0.8';
+
+          setTimeout(() =>
+          {
+            copyCommandBtn.textContent = originalText;
+            copyCommandBtn.style.opacity = '1';
+          }, 2000);
+        }
 
         // Log the command for user convenience
         console.log('Command copied to clipboard:', command);
       } catch (error)
       {
         console.error('Failed to copy to clipboard:', error);
+        if (window.toast)
+        {
+          window.toast.error('Failed to copy to clipboard');
+        }
       }
     });
   }
@@ -976,6 +1070,10 @@ function initializeEventListeners()
   const clearSCBindsBtn = document.getElementById('clear-sc-binds-btn');
   if (clearSCBindsBtn) clearSCBindsBtn.addEventListener('click', openClearSCBindsModal);
 
+  // Swap Joystick Prefixes button
+  const swapJoystickPrefixesBtn = document.getElementById('swap-joystick-prefixes-btn');
+  if (swapJoystickPrefixesBtn) swapJoystickPrefixesBtn.addEventListener('click', () => window.swapJoystickPrefixes && window.swapJoystickPrefixes());
+
   // Clear SC Binds modal buttons
   const clearBindsGenerateBtn = document.getElementById('clear-binds-generate-btn');
   const copyUnbindCommandBtn = document.getElementById('copy-unbind-command-btn');
@@ -983,6 +1081,18 @@ function initializeEventListeners()
   if (clearBindsGenerateBtn) clearBindsGenerateBtn.addEventListener('click', generateUnbindProfile);
   if (copyUnbindCommandBtn) copyUnbindCommandBtn.addEventListener('click', copyUnbindCommand);
   if (removeUnbindFilesBtn) removeUnbindFilesBtn.addEventListener('click', removeUnbindFiles);
+
+  // Restore Defaults button
+  const restoreDefaultsBtn = document.getElementById('restore-defaults-btn');
+  if (restoreDefaultsBtn) restoreDefaultsBtn.addEventListener('click', openRestoreDefaultsModal);
+
+  // Restore Defaults modal buttons
+  const restoreDefaultsGenerateBtn = document.getElementById('restore-defaults-generate-btn');
+  const copyRestoreDefaultsCommandBtn = document.getElementById('copy-restore-defaults-command-btn');
+  const removeRestoreDefaultsFilesBtn = document.getElementById('remove-restore-defaults-files-btn');
+  if (restoreDefaultsGenerateBtn) restoreDefaultsGenerateBtn.addEventListener('click', generateRestoreDefaultsProfile);
+  if (copyRestoreDefaultsCommandBtn) copyRestoreDefaultsCommandBtn.addEventListener('click', copyRestoreDefaultsCommand);
+  if (removeRestoreDefaultsFilesBtn) removeRestoreDefaultsFilesBtn.addEventListener('click', removeRestoreDefaultsFiles);
 
   // Auto-Save modal buttons
   const autoSaveModalCloseBtn = document.getElementById('auto-save-modal-close-btn');
@@ -1281,7 +1391,8 @@ window.removeBinding = async function (actionMapName, actionName, inputToClear)
     'Clear this binding?',
     'Clear Binding',
     'Clear',
-    'Cancel'
+    'Cancel',
+    'btn-danger'
   );
 
   // If user cancelled, stop immediately
@@ -1428,12 +1539,18 @@ window.updateUnsavedIndicator = updateUnsavedIndicator;
         try
         {
           await navigator.clipboard.writeText(logPath);
-          const originalText = logPathElement.textContent;
-          logPathElement.textContent = '✓ Copied!';
-          setTimeout(() =>
+          if (window.toast)
           {
-            logPathElement.textContent = originalText;
-          }, 2000);
+            window.toast.success('Log path copied to clipboard');
+          } else
+          {
+            const originalText = logPathElement.textContent;
+            logPathElement.textContent = '✓ Copied!';
+            setTimeout(() =>
+            {
+              logPathElement.textContent = originalText;
+            }, 2000);
+          }
         } catch (e)
         {
           console.error('Failed to copy to clipboard:', e);
@@ -1493,6 +1610,27 @@ function initializeFontSizeScaling()
       }
     }
   });
+
+  // Prevent Alt+Space from opening the system menu (hidden File/Edit menu)
+  // This intercepts the Alt key to stop the browser/webview default behavior
+  document.addEventListener('keydown', (e) =>
+  {
+    // Block Alt+Space specifically (system menu shortcut)
+    if (e.altKey && e.code === 'Space')
+    {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+
+    // Also block plain Alt key from activating the menu bar
+    // Only when a modal is open or during binding detection
+    if (e.key === 'Alt' && (window.isBindingModalOpen?.() || window.getIsDetectionActive?.()))
+    {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true); // Use capture phase to intercept before default handlers
 }
 
 function setFontSize(size)
@@ -1921,21 +2059,34 @@ async function copyUnbindCommand()
   {
     await navigator.clipboard.writeText(command);
 
-    // Visual feedback
-    const btn = document.getElementById('copy-unbind-command-btn');
-    const originalText = btn.textContent;
-    btn.textContent = '✅ Copied!';
-    btn.disabled = true;
-
-    setTimeout(() =>
+    // Show toast notification
+    if (window.toast)
     {
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }, 2000);
+      window.toast.success(`Command copied: ${command}`);
+    } else
+    {
+      // Fallback: Visual feedback on button
+      const btn = document.getElementById('copy-unbind-command-btn');
+      const originalText = btn.textContent;
+      btn.textContent = '✅ Copied!';
+      btn.disabled = true;
+
+      setTimeout(() =>
+      {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }
   } catch (error)
   {
     console.error('Failed to copy command:', error);
-    await showAlert('Failed to copy command to clipboard', 'Error');
+    if (window.toast)
+    {
+      window.toast.error('Failed to copy command to clipboard');
+    } else
+    {
+      await showAlert('Failed to copy command to clipboard', 'Error');
+    }
   }
 }
 
@@ -1971,9 +2122,238 @@ async function removeUnbindFiles()
   }
 }
 
+// ============================================================================
+// RESTORE DEFAULTS FUNCTIONS
+// ============================================================================
+
+function openRestoreDefaultsModal()
+{
+  const modal = document.getElementById('restore-defaults-modal');
+  modal.style.display = 'flex';
+}
+
+function closeRestoreDefaultsModal()
+{
+  const modal = document.getElementById('restore-defaults-modal');
+  modal.style.display = 'none';
+}
+
+function closeRestoreDefaultsSuccessModal()
+{
+  const modal = document.getElementById('restore-defaults-success-modal');
+  modal.style.display = 'none';
+}
+
+async function generateRestoreDefaultsProfile()
+{
+  const statusDiv = document.getElementById('restore-defaults-status');
+
+  try
+  {
+    // Get selected devices
+    const devices = {
+      keyboard: document.getElementById('restore-keyboard').checked,
+      mouse: document.getElementById('restore-mouse').checked,
+      gamepad: document.getElementById('restore-gamepad').checked,
+      joystick1: document.getElementById('restore-joystick1').checked,
+      joystick2: document.getElementById('restore-joystick2').checked,
+    };
+
+    // Check if at least one device is selected
+    if (!Object.values(devices).some(v => v))
+    {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color = 'var(--accent-primary)';
+      statusDiv.textContent = '⚠️ Please select at least one device to restore.';
+      return;
+    }
+
+    // Get the SC installation path from localStorage
+    const scInstallPath = localStorage.getItem('scInstallDirectory');
+    if (!scInstallPath)
+    {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color = 'var(--accent-warning)';
+      statusDiv.textContent = '⚠️ No SC installation directory configured. Go to Settings to configure it.';
+      return;
+    }
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.color = 'var(--text-secondary)';
+    statusDiv.textContent = '⏳ Generating defaults profile...';
+
+    console.log('Generating restore defaults profile with base path:', scInstallPath);
+
+    // Call backend to generate the restore defaults profile
+    const result = await invoke('generate_restore_defaults_profile', {
+      devices,
+      basePath: scInstallPath
+    });
+
+    console.log('Restore defaults profile generation result:', result);
+
+    // Close the main modal
+    closeRestoreDefaultsModal();
+
+    // Show success modal with results
+    const successModal = document.getElementById('restore-defaults-success-modal');
+    const locationsDiv = document.getElementById('restore-defaults-save-locations');
+
+    if (result.saved_locations && result.saved_locations.length > 0)
+    {
+      let html = '<p><strong>📁 Saved to:</strong></p><ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">';
+      result.saved_locations.forEach(loc =>
+      {
+        html += `<li><code>${loc}</code></li>`;
+      });
+      html += '</ul>';
+      locationsDiv.innerHTML = html;
+    }
+    else
+    {
+      locationsDiv.innerHTML = '<p class="info-text">⚠️ No SC installation directories found. File created in current directory.</p>';
+    }
+
+    successModal.style.display = 'flex';
+
+  } catch (error)
+  {
+    console.error('Error generating restore defaults profile:', error);
+    statusDiv.style.display = 'block';
+    statusDiv.style.color = 'var(--accent-primary)';
+    statusDiv.textContent = `❌ Error: ${error}`;
+  }
+}
+
+async function copyRestoreDefaultsCommand()
+{
+  const command = 'pp_RebindKeys RESTORE_DEFAULTS';
+
+  try
+  {
+    await navigator.clipboard.writeText(command);
+
+    // Show toast notification
+    if (window.toast)
+    {
+      window.toast.success(`Command copied: ${command}`);
+    } else
+    {
+      // Fallback: Visual feedback on button
+      const btn = document.getElementById('copy-restore-defaults-command-btn');
+      const originalText = btn.textContent;
+      btn.textContent = '✅ Copied!';
+      btn.disabled = true;
+
+      setTimeout(() =>
+      {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }
+  } catch (error)
+  {
+    console.error('Failed to copy command:', error);
+    if (window.toast)
+    {
+      window.toast.error('Failed to copy command to clipboard');
+    } else
+    {
+      await showAlert('Failed to copy command to clipboard', 'Error');
+    }
+  }
+}
+
+async function removeRestoreDefaultsFiles()
+{
+  const confirmed = await showConfirmation(
+    'Are you sure you want to remove the RESTORE_DEFAULTS.xml files from all SC installation directories?',
+    'Remove Defaults Files'
+  );
+
+  if (!confirmed) return;
+
+  try
+  {
+    const result = await invoke('remove_restore_defaults_profile');
+
+    if (result.removed_count > 0)
+    {
+      await showAlert(
+        `Successfully removed ${result.removed_count} restore defaults profile file(s).`,
+        'Files Removed'
+      );
+      closeRestoreDefaultsSuccessModal();
+    }
+    else
+    {
+      await showAlert('No restore defaults profile files found to remove.', 'Info');
+    }
+  } catch (error)
+  {
+    console.error('Error removing restore defaults files:', error);
+    await showAlert(`Error removing files: ${error}`, 'Error');
+  }
+}
+
+// Make functions globally available
+window.closeRestoreDefaultsModal = closeRestoreDefaultsModal;
+window.closeRestoreDefaultsSuccessModal = closeRestoreDefaultsSuccessModal;
+
+// ============================================================================
+// HELP PAGE FUNCTIONS
+// ============================================================================
+
+async function copyResortDevicesCommand()
+{
+  const command = 'pp_resortdevices joystick 1 2';
+
+  try
+  {
+    // Copy to clipboard
+    await navigator.clipboard.writeText(command);
+
+    // Show toast notification
+    if (window.toast)
+    {
+      window.toast.success(`Command copied: ${command}`);
+    } else
+    {
+      // Fallback: Show temporary success message on button
+      const btn = document.getElementById('copy-resort-devices-btn');
+      if (btn)
+      {
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.style.opacity = '0.8';
+
+        setTimeout(() =>
+        {
+          btn.textContent = originalText;
+          btn.style.opacity = '1';
+        }, 2000);
+      }
+    }
+
+    // Log the command for user convenience
+    console.log('Command copied to clipboard:', command);
+  } catch (error)
+  {
+    console.error('Failed to copy to clipboard:', error);
+    if (window.toast)
+    {
+      window.toast.error('Failed to copy command to clipboard');
+    } else
+    {
+      await showAlert('Failed to copy command to clipboard', 'Error');
+    }
+  }
+}
+
 // Make functions globally available
 window.closeClearSCBindsModal = closeClearSCBindsModal;
 window.closeClearSCBindsSuccessModal = closeClearSCBindsSuccessModal;
+window.copyResortDevicesCommand = copyResortDevicesCommand;
 
 // ============================================================================
 // AUTO-SAVE MODAL FUNCTIONS

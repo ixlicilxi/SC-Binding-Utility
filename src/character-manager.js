@@ -34,6 +34,15 @@ class CharacterManager
 
         // Setup event listeners
         this.setupEventListeners();
+
+        // Listen for storage changes to refresh when SC directory is set
+        window.addEventListener('storage', (e) =>
+        {
+            if (e.key === 'scInstallDirectory')
+            {
+                this.loadInstallations();
+            }
+        });
     }
 
     setupEventListeners()
@@ -48,6 +57,27 @@ class CharacterManager
         document.getElementById('refresh-characters-btn')?.addEventListener('click', async () =>
         {
             await this.refreshAll();
+        });
+
+        // Reload data when character tab is clicked
+        const characterTab = document.getElementById('tab-character');
+        if (characterTab)
+        {
+            characterTab.addEventListener('click', async () =>
+            {
+                await this.loadMasterCharacters();
+                await this.loadInstallations();
+            });
+        }
+
+        // Reload data when page becomes visible (user returns from settings page)
+        document.addEventListener('visibilitychange', () =>
+        {
+            if (!document.hidden)
+            {
+                this.loadMasterCharacters();
+                this.loadInstallations();
+            }
         });
     }
 
@@ -87,6 +117,16 @@ class CharacterManager
                 localStorage.setItem('characterLibraryPath', selectedPath);
                 this.updateLibraryPathDisplay();
                 await this.loadMasterCharacters();
+                // Refresh installation characters to update sync status
+                for (const installation of this.installations)
+                {
+                    await this.loadInstallationCharacters(installation);
+                }
+                if (this.activeInstallation)
+                {
+                    this.renderInstallationContent(this.activeInstallation);
+                }
+                this.renderMasterCharacters();
             }
         } catch (error)
         {
@@ -830,7 +870,24 @@ class CharacterManager
 
     showNotification(message, type = 'info')
     {
-        // Create notification element
+        // Use global toast system if available
+        if (window.toast)
+        {
+            switch (type)
+            {
+                case 'success':
+                    window.toast.success(message);
+                    break;
+                case 'error':
+                    window.toast.error(message);
+                    break;
+                default:
+                    window.toast.info(message);
+            }
+            return;
+        }
+
+        // Fallback: Create notification element
         const notification = document.createElement('div');
         notification.className = `character-notification character-notification-${type}`;
 

@@ -150,6 +150,7 @@ pub struct DetectionComplete {
 pub struct JoystickInfo {
     pub id: usize,
     pub name: String,
+    pub product_name: Option<String>, // Just the product name without manufacturer
     pub is_connected: bool,
     pub button_count: usize,
     pub axis_count: usize,
@@ -864,6 +865,7 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                 joysticks.push(JoystickInfo {
                     id: joysticks.len() + 1,
                     name: full_name,
+                    product_name: Some(device_name.to_string()),
                     is_connected: true,
                     button_count,
                     axis_count,
@@ -887,6 +889,7 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                 joysticks.push(JoystickInfo {
                     id: joysticks.len() + 1, // Continue numbering after HID devices
                     name: format!("Xbox Controller (XInput {})", controller_id),
+                    product_name: None,
                     is_connected: true,
                     button_count: 15,
                     axis_count: 6,

@@ -55,6 +55,7 @@ const dom = {
     pageClearImageBtn: null,
     pageImageInfo: null,
     pageMirrorSelect: null,
+    pageMirrorDropdown: null,
     pageImageFileInput: null
 };
 
@@ -218,13 +219,15 @@ function renderPageList()
     dom.pagesList.innerHTML = '';
     dom.pagesEmpty.style.display = pages.length ? 'none' : 'block';
 
-    pages.forEach(page =>
+    pages.forEach((page, index) =>
     {
         const card = document.createElement('div');
         card.className = `template-page-card ${page.id === state.selectedPageId ? 'active' : ''}`;
         card.dataset.pageId = page.id;
+        card.dataset.pageIndex = index;
         card.innerHTML = `
-            <div>
+            <div class="page-drag-handle" title="Drag to reorder">⋮⋮</div>
+            <div class="page-card-content">
                 <span class="template-page-name">${page.name || 'Untitled Page'}</span>
                 <span class="template-page-device">${page.device_name || 'Device not selected'}</span>
                 <div class="template-page-meta">${describeAxisMapping(page)}</div>
@@ -234,11 +237,189 @@ function renderPageList()
                 <button type="button" class="btn btn-secondary btn-sm page-delete-btn">Delete</button>
             </div>
         `;
+
+        // Add mouse-based drag handlers to the drag handle
+        const handle = card.querySelector('.page-drag-handle');
+        handle.addEventListener('mousedown', (e) => startPageDrag(e, card, page.id, index));
+
         dom.pagesList.appendChild(card);
     });
 
     // Also update the toolbar page selector
     updateToolbarPageSelector();
+}
+
+// Mouse-based drag and drop state
+let dragState = {
+    isDragging: false,
+    draggedPageId: null,
+    draggedIndex: null,
+    draggedCard: null,
+    placeholder: null,
+    startY: 0,
+    offsetY: 0
+};
+
+function startPageDrag(e, card, pageId, index)
+{
+    e.preventDefault();
+    e.stopPropagation();
+
+    dragState.isDragging = true;
+    dragState.draggedPageId = pageId;
+    dragState.draggedIndex = index;
+    dragState.draggedCard = card;
+    dragState.startY = e.clientY;
+
+    // Get the card's position relative to the list
+    const cardRect = card.getBoundingClientRect();
+    dragState.offsetY = e.clientY - cardRect.top;
+
+    // Add dragging class
+    card.classList.add('dragging');
+
+    // Create placeholder
+    dragState.placeholder = document.createElement('div');
+    dragState.placeholder.className = 'page-drag-placeholder';
+    dragState.placeholder.style.height = cardRect.height + 'px';
+
+    // Insert placeholder after the card
+    card.parentNode.insertBefore(dragState.placeholder, card.nextSibling);
+
+    // Make the card position absolute for dragging
+    card.style.position = 'absolute';
+    card.style.width = cardRect.width + 'px';
+    card.style.zIndex = '1000';
+    card.style.left = cardRect.left + 'px';
+    card.style.top = cardRect.top + 'px';
+    card.style.pointerEvents = 'none';
+
+    // Move card to body so it can move freely
+    document.body.appendChild(card);
+
+    // Add global mouse listeners
+    document.addEventListener('mousemove', handlePageDragMove);
+    document.addEventListener('mouseup', handlePageDragEnd);
+
+    console.log('[DragDrop] Started dragging page:', pageId);
+}
+
+function handlePageDragMove(e)
+{
+    if (!dragState.isDragging || !dragState.draggedCard) return;
+
+    // Move the dragged card with the mouse
+    const newTop = e.clientY - dragState.offsetY;
+    dragState.draggedCard.style.top = newTop + 'px';
+
+    // Find which card we're hovering over
+    const cards = dom.pagesList.querySelectorAll('.template-page-card:not(.dragging)');
+    let insertBefore = null;
+
+    cards.forEach(card =>
+    {
+        const rect = card.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+
+        // Clear previous highlights
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+
+        if (e.clientY < midpoint && !insertBefore)
+        {
+            insertBefore = card;
+            card.classList.add('drag-over-top');
+        } else if (e.clientY >= midpoint && e.clientY < rect.bottom)
+        {
+            card.classList.add('drag-over-bottom');
+        }
+    });
+
+    // Move placeholder to new position
+    if (dragState.placeholder)
+    {
+        if (insertBefore)
+        {
+            dom.pagesList.insertBefore(dragState.placeholder, insertBefore);
+        } else
+        {
+            // Append to end if past all cards
+            dom.pagesList.appendChild(dragState.placeholder);
+        }
+    }
+}
+
+function handlePageDragEnd(e)
+{
+    if (!dragState.isDragging) return;
+
+    console.log('[DragDrop] Drag ended');
+
+    // Remove global listeners
+    document.removeEventListener('mousemove', handlePageDragMove);
+    document.removeEventListener('mouseup', handlePageDragEnd);
+
+    // Clear all highlights
+    dom.pagesList.querySelectorAll('.template-page-card').forEach(card =>
+    {
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+
+    // Find new index based on placeholder position
+    const placeholderIndex = Array.from(dom.pagesList.children).indexOf(dragState.placeholder);
+
+    // Remove placeholder
+    if (dragState.placeholder && dragState.placeholder.parentNode)
+    {
+        dragState.placeholder.parentNode.removeChild(dragState.placeholder);
+    }
+
+    // Remove the floating card
+    if (dragState.draggedCard && dragState.draggedCard.parentNode)
+    {
+        dragState.draggedCard.parentNode.removeChild(dragState.draggedCard);
+    }
+
+    // Calculate new index (account for the fact placeholder was in the list)
+    let newIndex = placeholderIndex;
+    if (dragState.draggedIndex < placeholderIndex)
+    {
+        newIndex = placeholderIndex - 1; // Adjust because we removed original first
+    }
+
+    // Only reorder if position actually changed
+    if (newIndex !== dragState.draggedIndex && newIndex >= 0)
+    {
+        const pages = state.template.pages;
+        const [movedPage] = pages.splice(dragState.draggedIndex, 1);
+
+        // Adjust newIndex if needed
+        if (dragState.draggedIndex < newIndex)
+        {
+            newIndex = Math.min(newIndex, pages.length);
+        }
+
+        pages.splice(newIndex, 0, movedPage);
+
+        console.log(`[DragDrop] Moved page "${movedPage.name}" from index ${dragState.draggedIndex} to ${newIndex}`);
+
+        // Mark as dirty and refresh UI
+        markTemplateDirty();
+        callbacks.onPagesChanged?.(state.template.pages);
+    }
+
+    // Always re-render to restore normal state
+    renderPageList();
+
+    // Reset drag state
+    dragState = {
+        isDragging: false,
+        draggedPageId: null,
+        draggedIndex: null,
+        draggedCard: null,
+        placeholder: null,
+        startY: 0,
+        offsetY: 0
+    };
 }
 
 function updateToolbarPageSelector()
@@ -319,9 +500,9 @@ function openPageModal(pageId = null)
 
             // Populate mirror dropdown and set value
             populateMirrorSelect(pageId);
-            if (dom.pageMirrorSelect)
+            if (dom.pageMirrorDropdown)
             {
-                dom.pageMirrorSelect.value = page.mirror_from_page_id || '';
+                dom.pageMirrorDropdown.setValue(page.mirror_from_page_id || '');
             }
 
             dom.pageDeleteBtn.style.display = 'inline-flex';
@@ -343,7 +524,7 @@ function openPageModal(pageId = null)
 
         // Populate mirror dropdown for new page
         populateMirrorSelect(null);
-        if (dom.pageMirrorSelect) dom.pageMirrorSelect.value = '';
+        if (dom.pageMirrorDropdown) dom.pageMirrorDropdown.setValue('');
 
         dom.pageDeleteBtn.style.display = 'none';
     }
@@ -380,13 +561,21 @@ function savePageFromModal()
     // Get devicePrefix from CustomDropdown
     const devicePrefix = dom.devicePrefixDropdown ? dom.devicePrefixDropdown.getValue() : '';
 
+    // Validate that a prefix has been selected
+    if (!devicePrefix || devicePrefix.trim() === '')
+    {
+        const showAlert = window.showAlert || alert;
+        showAlert('Please select a device prefix before saving.', 'Device Prefix Required');
+        return;
+    }
+
     // Always use custom mapping (from HID descriptor or user configuration)
     const axisMapping = cloneDeep(state.modalCustomMapping || {});
 
     // Get image and mirror settings
     const imagePath = state.modalImagePath || '';
     const imageDataUrl = state.modalImageDataUrl || null;
-    const mirrorFromPageId = dom.pageMirrorSelect ? dom.pageMirrorSelect.value : '';
+    const mirrorFromPageId = dom.pageMirrorDropdown ? dom.pageMirrorDropdown.getValue() : '';
 
     if (state.modalEditingPageId)
     {
@@ -683,6 +872,12 @@ function populateMirrorSelect(currentPageId)
     });
 
     dom.pageMirrorSelect.innerHTML = options.join('');
+
+    // Reinitialize the CustomDropdown to reflect the new options
+    if (dom.pageMirrorDropdown)
+    {
+        dom.pageMirrorDropdown.populateFromSelect();
+    }
 }
 
 function handlePageImageLoad()
@@ -1179,7 +1374,7 @@ export async function initializeTemplatePagesUI(options = {})
     dom.pageModal = document.getElementById('template-page-modal');
     dom.pageModalTitle = document.getElementById('template-page-modal-title');
     dom.pageNameInput = document.getElementById('template-page-name');
-    dom.pagePrefixSelect = document.getElementById('template-page-prefix-select');
+    dom.pagePrefixSelect = document.getElementById('template-page-prefix');
 
     // Initialize CustomDropdown for device prefix
     if (dom.pagePrefixSelect)
@@ -1207,6 +1402,17 @@ export async function initializeTemplatePagesUI(options = {})
     dom.pageClearImageBtn = document.getElementById('page-clear-image-btn');
     dom.pageImageInfo = document.getElementById('page-image-info');
     dom.pageMirrorSelect = document.getElementById('page-mirror-select');
+
+    // Initialize CustomDropdown for mirror select
+    if (dom.pageMirrorSelect)
+    {
+        dom.pageMirrorDropdown = new CustomDropdown(dom.pageMirrorSelect, {
+            onChange: (item) =>
+            {
+                console.log('[MirrorDropdown] Changed to:', item.value);
+            }
+        });
+    }
 
     if (!dom.pagesList)
     {

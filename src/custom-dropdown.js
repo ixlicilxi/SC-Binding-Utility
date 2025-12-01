@@ -8,6 +8,7 @@ export class CustomDropdown
         this.element = element;
         this.options = options;
         this.isOpen = false;
+        this.isSelecting = false; // Flag to prevent toggle during selection
         this.selectedIndex = 0;
         this.optionTooltips = options.optionTooltips || {};
         this.onChange = options.onChange || null;
@@ -57,7 +58,17 @@ export class CustomDropdown
         this.element.style.display = 'none';
 
         // Event listeners
-        this.button.addEventListener('click', () => this.toggle());
+        this.button.addEventListener('click', (e) =>
+        {
+            // Don't toggle if we're in the middle of selecting an option
+            if (this.isSelecting)
+            {
+                return;
+            }
+            e.stopPropagation();
+            this.toggle();
+        });
+
         document.addEventListener('click', (e) => this.handleOutsideClick(e));
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
     }
@@ -101,7 +112,13 @@ export class CustomDropdown
             option.textContent = item.label;
             option.dataset.index = index;
 
-            option.addEventListener('click', () => this.selectOption(index));
+            option.addEventListener('click', (e) =>
+            {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                this.selectOption(index);
+            });
 
             // Add hover tooltip if available
             if (item.tooltip)
@@ -197,24 +214,37 @@ export class CustomDropdown
 
     selectOption(index)
     {
+        // Set flag to prevent toggle from firing
+        this.isSelecting = true;
+
         this.selectedIndex = index;
         this.hideHoverTooltip();
         this.updateButtonText();
-        this.renderOptions();
-        this.close();
 
-        // Update original select element
+        // Update original select element BEFORE closing
         if (this.element.tagName === 'SELECT')
         {
             this.element.selectedIndex = index;
             this.element.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        // Call onChange callback
+        // Call onChange callback BEFORE closing
         if (this.onChange)
         {
             this.onChange(this.items[index]);
         }
+
+        this.close();
+
+        // Render options AFTER closing to update the selected state
+        // This prevents the click from bubbling to a recreated DOM element
+        this.renderOptions();
+
+        // Reset flag after a short delay to allow any pending events to clear
+        setTimeout(() =>
+        {
+            this.isSelecting = false;
+        }, 100);
     }
 
     toggle()

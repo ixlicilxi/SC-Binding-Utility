@@ -38,6 +38,7 @@ let currentDetectingDevice = null; // 'js1', 'js2', or 'gp1'
 let deviceDetectionSessionId = null;
 let deviceMappings = {}; // Stores { js1: { detectedNum: 3, detectedPrefix: 'js', deviceName: 'VKB', deviceUuid: 'uuid-string' }, ... }
 let deviceUuidMapping = {}; // Stores UUID-based mappings: { 'uuid-string': 'js1', ... }
+let deviceUuidToAutoPrefix = {}; // Maps device UUID to auto-detected prefix (e.g., {'046d:c215': 'js2'}) - matches device manager's enumeration
 
 // Joystick Test State
 let testingJoystickNum = null;
@@ -133,6 +134,44 @@ async function loadDeviceAxisNames()
     } catch (error)
     {
         console.error('[Axis Names] Failed to load device axis names:', error);
+    }
+}
+
+/**
+ * Build device UUID to auto-detected prefix mapping
+ * This ensures keybindings page uses the same device enumeration order as device manager
+ */
+async function buildDeviceUuidMapping()
+{
+    try
+    {
+        const devices = await invoke('detect_joysticks');
+        console.log('[KEYBINDINGS] Building device UUID mapping from detected devices:', devices);
+
+        // Clear existing mapping
+        deviceUuidToAutoPrefix = {};
+
+        // Count joysticks and gamepads separately (same logic as device-manager.js)
+        let joystickCount = 0;
+        let gamepadCount = 0;
+
+        devices.forEach((device) =>
+        {
+            const isGp = device.device_type === 'Gamepad';
+            const categoryIndex = isGp ? ++gamepadCount : ++joystickCount;
+            const autoDetectedId = isGp ? `gp${categoryIndex}` : `js${categoryIndex}`;
+
+            if (device.uuid)
+            {
+                deviceUuidToAutoPrefix[device.uuid] = autoDetectedId;
+                console.log(`[KEYBINDINGS] Mapped UUID ${device.uuid} -> ${autoDetectedId} (${device.name})`);
+            }
+        });
+
+        console.log('[KEYBINDINGS] Device UUID mapping complete:', deviceUuidToAutoPrefix);
+    } catch (error)
+    {
+        console.error('[KEYBINDINGS] Failed to build device UUID mapping:', error);
     }
 }
 
@@ -337,6 +376,11 @@ function cleanupInputDetectionListeners()
         keyboardDetectionHandler = null;
     }
     keyboardDetectionActive = false;
+
+    // Clear tracked modifier states
+    window._lastAltKeyPressed = null;
+    window._lastShiftKeyPressed = null;
+    window._lastCtrlKeyPressed = null;
 
     if (window.mouseDetectionHandler)
     {
@@ -681,6 +725,20 @@ async function newKeybinding()
         await invoke('clear_custom_bindings');
         await invoke('load_all_binds');
 
+        // Initialize an empty ActionMaps structure in the backend
+        // This is needed so that export_keybindings has something to work with
+        const emptyActionMaps = {
+            profile_name: 'New Profile',
+            action_maps: [],
+            categories: [],
+            devices: {
+                keyboards: [],
+                mice: [],
+                joysticks: []
+            }
+        };
+        await invoke('restore_user_customizations', { customizations: emptyActionMaps });
+
         // Get fresh merged bindings (AllBinds only, no customizations)
         currentKeybindings = await invoke('get_merged_bindings');
 
@@ -722,6 +780,12 @@ async function newKeybinding()
 
         // Re-render with fresh state
         renderKeybindings();
+
+        // Show success toast
+        if (window.toast)
+        {
+            window.toast.success('New profile created. Make your changes and save when ready.');
+        }
 
     } catch (error)
     {
@@ -875,35 +939,121 @@ async function saveKeybindings()
                     });
 
                     // Save to each installation (except the one with the currently open file)
+                    const deployResults = [];
+                    const failedInstallations = [];
+
                     for (const installation of installationsToUpdate)
                     {
-                        await invoke('save_bindings_to_install', {
-                            installationPath: installation.path
-                        });
-                        console.log(`Saved to ${installation.name}`);
+                        try
+                        {
+                            await invoke('save_bindings_to_install', {
+                                installationPath: installation.path
+                            });
+                            console.log(`Saved to ${installation.name}`);
+                            deployResults.push({ name: installation.name, success: true });
+                        } catch (deployError)
+                        {
+                            console.error(`Failed to deploy to ${installation.name}:`, deployError);
+                            const errorMsg = typeof deployError === 'string' ? deployError : deployError.message || 'Unknown error';
+                            failedInstallations.push({ name: installation.name, error: errorMsg });
+                            deployResults.push({ name: installation.name, success: false, error: errorMsg });
+                        }
                     }
 
-                    // Build success message
-                    let successMsg = `Saved & deployed to ${installationsToUpdate.length} installation(s)`;
-                    if (skippedInstallation)
+                    const successCount = deployResults.filter(r => r.success).length;
+                    const failCount = failedInstallations.length;
+
+                    // Build message based on results
+                    if (failCount === 0)
                     {
-                        successMsg += ` (${skippedInstallation} was skipped as it's the currently open file location)`;
+                        // All deployments succeeded
+                        let successMsg = `Saved & deployed to ${successCount} installation(s)`;
+                        if (skippedInstallation)
+                        {
+                            successMsg += ` (${skippedInstallation} was skipped as it's the currently open file location)`;
+                        }
+                        successMsg += '!';
+                        if (window.toast)
+                        {
+                            window.toast.success(successMsg);
+                        } else
+                        {
+                            window.showSuccessMessage(successMsg);
+                        }
+                    } else if (successCount > 0)
+                    {
+                        // Partial success
+                        const failedNames = failedInstallations.map(f => f.name).join(', ');
+                        const errorDetails = failedInstallations.map(f => `${f.name}: ${f.error}`).join('\n');
+                        if (window.toast)
+                        {
+                            window.toast.warning(`Deployed to ${successCount} installation(s), but ${failCount} failed: ${failedNames}`, {
+                                title: 'Partial Deployment',
+                                details: errorDetails,
+                                duration: 8000
+                            });
+                        } else
+                        {
+                            window.showSuccessMessage(`Saved (${failCount} deployment(s) failed: ${failedNames})`);
+                        }
+                    } else
+                    {
+                        // All deployments failed
+                        const errorDetails = failedInstallations.map(f => `${f.name}: ${f.error}`).join('\n');
+                        if (window.toast)
+                        {
+                            window.toast.warning('Saved locally, but all deployments failed', {
+                                title: 'Deployment Failed',
+                                details: errorDetails,
+                                duration: 8000
+                            });
+                        } else
+                        {
+                            window.showSuccessMessage('Saved (all deployments failed)');
+                        }
                     }
-                    successMsg += '!';
-                    window.showSuccessMessage(successMsg);
                 } else
                 {
-                    window.showSuccessMessage('Saved!');
+                    // No installations found - auto-deploy enabled but nothing to deploy to
+                    if (window.toast)
+                    {
+                        window.toast.warning('Saved locally. No SC installations found to deploy to.', {
+                            title: 'No Installations',
+                            details: `Checked directory: ${scInstallDirectory}\n\nMake sure your Star Citizen installation directory is correctly configured in Settings.`,
+                            duration: 6000
+                        });
+                    } else
+                    {
+                        window.showSuccessMessage('Saved! (No installations found for auto-deploy)');
+                    }
                 }
             } catch (error)
             {
                 console.error('Error auto-saving to installations:', error);
-                window.showSuccessMessage('Saved (failed to deploy to installations)');
+                // Show a more verbose error message (this catches scan_sc_installations errors)
+                const errorMessage = typeof error === 'string' ? error : error.message || 'Unknown error';
+                if (window.toast)
+                {
+                    window.toast.warning('Saved locally, but failed to scan installations', {
+                        title: 'Partial Save',
+                        details: errorMessage,
+                        duration: 8000
+                    });
+                } else
+                {
+                    window.showSuccessMessage(`Saved (scan failed: ${errorMessage})`);
+                }
             }
         } else
         {
             // Show brief success message
-            window.showSuccessMessage('Saved!');
+            if (window.toast)
+            {
+                window.toast.success('Saved!');
+            } else
+            {
+                window.showSuccessMessage('Saved!');
+            }
         }
     } catch (error)
     {
@@ -993,6 +1143,9 @@ function displayKeybindings()
 
     // Load axis names from HID descriptors for display
     loadDeviceAxisNames();
+
+    // Build device UUID to auto-detected prefix mapping (ensures consistent device numbering)
+    buildDeviceUuidMapping();
 
     // Render categories
     renderCategories();
@@ -1341,25 +1494,70 @@ function renderKeybindings()
             // Search filter - search in action name AND binding names
             if (searchTerm)
             {
-                // Support OR operator with |
-                const terms = searchTerm.split('|').map(t => t.trim()).filter(t => t.length > 0);
+                // Support OR operator with | and AND operator with +
+                // If search contains +, all terms must match (AND logic)
+                // If search contains |, any term can match (OR logic)
+                const hasAndOperator = searchTerm.includes('+');
+                const hasOrOperator = searchTerm.includes('|');
 
-                const matchesAny = terms.some(term =>
+                let terms;
+                let requireAll = false;
+
+                if (hasAndOperator && !hasOrOperator)
                 {
-                    const searchInAction = displayName.toLowerCase().includes(term) ||
-                        action.name.toLowerCase().includes(term);
+                    // Pure AND operator
+                    terms = searchTerm.split('+').map(t => t.trim()).filter(t => t.length > 0);
+                    requireAll = true;
+                } else if (hasOrOperator && !hasAndOperator)
+                {
+                    // Pure OR operator
+                    terms = searchTerm.split('|').map(t => t.trim()).filter(t => t.length > 0);
+                    requireAll = false;
+                } else if (hasAndOperator && hasOrOperator)
+                {
+                    // Mixed operators - treat + as primary separator (higher precedence)
+                    terms = searchTerm.split('+').map(t => t.trim()).filter(t => t.length > 0);
+                    requireAll = true;
+                } else
+                {
+                    // No operators, treat as single term
+                    terms = [searchTerm.trim()];
+                    requireAll = false;
+                }
 
-                    const searchInBindings = action.bindings && action.bindings.some(binding =>
-                        binding.display_name.toLowerCase().includes(term) ||
-                        binding.input.toLowerCase().includes(term)
-                    );
+                const matches = terms.map(term =>
+                {
+                    // For OR-separated terms, each can have sub-terms
+                    const subTerms = term.split('|').map(t => t.trim()).filter(t => t.length > 0);
 
-                    return searchInAction || searchInBindings;
+                    return subTerms.some(subTerm =>
+                    {
+                        const searchInAction = displayName.toLowerCase().includes(subTerm) ||
+                            action.name.toLowerCase().includes(subTerm);
+
+                        const searchInBindings = action.bindings && action.bindings.some(binding =>
+                            binding.display_name.toLowerCase().includes(subTerm) ||
+                            binding.input.toLowerCase().includes(subTerm)
+                        );
+
+                        return searchInAction || searchInBindings;
+                    });
                 });
 
-                if (!matchesAny)
+                if (requireAll)
                 {
-                    return false;
+                    // All terms must match
+                    if (!matches.every(m => m))
+                    {
+                        return false;
+                    }
+                } else
+                {
+                    // At least one term must match
+                    if (!matches.some(m => m))
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -1378,6 +1576,10 @@ function renderKeybindings()
       <div class="action-map">
         <div class="action-map-header" onclick="toggleActionMap(this)">
           <h3>${actionMapLabel}</h3>
+          <div class="action-map-header-buttons">
+            <button class="action-map-btn btn-clear" onclick="event.stopPropagation(); window.clearAllActionMapBindings('${actionMap.name}')" title="Clear all bindings in this category">Clear All</button>
+            <button class="action-map-btn btn-reset" onclick="event.stopPropagation(); window.resetAllActionMapBindings('${actionMap.name}')" title="Reset all bindings in this category to defaults">Reset All</button>
+          </div>
           <span class="action-map-toggle">▼</span>
         </div>
         <div class="actions-list">
@@ -1457,14 +1659,26 @@ function renderActionBindings(action)
             displayText += ` [${binding.multi_tap}x Tap]`;
         }
 
-        return `<span class="binding-tag ${inputType.toLowerCase()}">${displayText}</span>`;
+        return `
+            <span class="binding-tag ${inputType.toLowerCase()}">
+                <span class="binding-tag-text">${displayText}</span>
+                <button class="binding-tag-remove" onclick="window.removeBindingTag(event, '${action.name.replace(/'/g, "\\'")}', '${binding.input.replace(/'/g, "\\'")}')" title="Remove this binding">×</button>
+            </span>
+        `;
     }).filter(Boolean).join('');
 }
 
 // Global success message helper
 window.showSuccessMessage = function (message)
 {
-    // Create a temporary success indicator
+    // Use the toast system if available
+    if (window.toast && window.toast.success)
+    {
+        window.toast.success(message);
+        return;
+    }
+
+    // Fallback: Create a temporary success indicator
     const indicator = document.createElement('div');
     indicator.textContent = message;
     indicator.style.cssText = `
@@ -1563,7 +1777,7 @@ const processInput = (result) =>
         scFormattedInput = toStarCitizenFormat(mappedInput);
     }
 
-    // Add modifier prefixes if any (lowercase to match AllBinds.xml format)
+    // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
     if (result.modifiers && result.modifiers.length > 0)
     {
         const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
@@ -1574,7 +1788,20 @@ const processInput = (result) =>
 
         if (sortedModifiers.length > 0)
         {
-            scFormattedInput = sortedModifiers.join('+') + '+' + scFormattedInput;
+            // Insert modifier after device prefix: "kb1_f" -> "kb1_lalt+f"
+            // Match device prefix pattern like "kb1_", "js2_", "mouse1_", "gp1_"
+            const prefixMatch = scFormattedInput.match(/^(kb\d*|js\d*|mouse\d*|gp\d*)_(.+)$/);
+            if (prefixMatch)
+            {
+                const devicePrefix = prefixMatch[1];
+                const inputPart = prefixMatch[2];
+                scFormattedInput = `${devicePrefix}_${sortedModifiers.join('+')}+${inputPart}`;
+            }
+            else
+            {
+                // Fallback if no device prefix found
+                scFormattedInput = sortedModifiers.join('+') + '+' + scFormattedInput;
+            }
         }
     }
 
@@ -1589,17 +1816,39 @@ const processInput = (result) =>
         });
     }
 
-    // Add modifiers to display name
+    // Add modifiers to display name after device type (e.g., "Keyboard - Left Alt + F")
     if (result.modifiers && result.modifiers.length > 0)
     {
         const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
+        const modifierDisplayNames = {
+            'LALT': 'Left Alt',
+            'RALT': 'Right Alt',
+            'LCTRL': 'Left Ctrl',
+            'RCTRL': 'Right Ctrl',
+            'LSHIFT': 'Left Shift',
+            'RSHIFT': 'Right Shift'
+        };
         const sortedModifiers = result.modifiers
             .filter(mod => modifierOrder.includes(mod))
-            .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b));
+            .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
+            .map(mod => modifierDisplayNames[mod] || mod);
 
         if (sortedModifiers.length > 0)
         {
-            displayName = sortedModifiers.join(' + ') + ' + ' + displayName;
+            // Insert modifiers after device type: "Keyboard - F" -> "Keyboard - Left Alt + F"
+            // Match pattern like "Device Type - Input"
+            const displayMatch = displayName.match(/^(.+?)\s*-\s*(.+)$/);
+            if (displayMatch)
+            {
+                const deviceType = displayMatch[1];
+                const inputPart = displayMatch[2];
+                displayName = `${deviceType} - ${sortedModifiers.join(' + ')} + ${inputPart}`;
+            }
+            else
+            {
+                // Fallback if no device type separator found
+                displayName = sortedModifiers.join(' + ') + ' + ' + displayName;
+            }
         }
     }
 
@@ -2096,28 +2345,88 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
             const key = event.key;
 
             // Detect modifiers being held
+            // We need to track which specific modifier keys are currently pressed
+            // event.location only tells us about the current key, not held modifiers
+            // So we use event.getModifierState() and track pressed keys via code
             const modifiers = [];
-            if (event.shiftKey) modifiers.push(event.location === 1 ? 'LSHIFT' : 'RSHIFT');
-            if (event.ctrlKey) modifiers.push(event.location === 1 ? 'LCTRL' : 'RCTRL');
-            if (event.altKey) modifiers.push(event.location === 1 ? 'LALT' : 'RALT');
+
+            // For modifier detection, we need to check what's actually held down
+            // The issue is that event.shiftKey/ctrlKey/altKey don't tell us left vs right
+            // We need to track this separately or use the code of the current key if it's a modifier
+            if (event.shiftKey)
+            {
+                // Check if we can determine left/right from the current key
+                if (code === 'ShiftLeft')
+                {
+                    modifiers.push('LSHIFT');
+                } else if (code === 'ShiftRight')
+                {
+                    modifiers.push('RSHIFT');
+                } else
+                {
+                    // Shift is held but we're pressing a different key
+                    // Default to left shift (most common)
+                    modifiers.push('LSHIFT');
+                }
+            }
+            if (event.ctrlKey)
+            {
+                if (code === 'ControlLeft')
+                {
+                    modifiers.push('LCTRL');
+                } else if (code === 'ControlRight')
+                {
+                    modifiers.push('RCTRL');
+                } else
+                {
+                    modifiers.push('LCTRL');
+                }
+            }
+            if (event.altKey)
+            {
+                if (code === 'AltLeft')
+                {
+                    modifiers.push('LALT');
+                } else if (code === 'AltRight')
+                {
+                    modifiers.push('RALT');
+                } else
+                {
+                    // Alt is held but we're pressing a different key
+                    // We need to track which alt was pressed - check keyboard state
+                    // Unfortunately, there's no reliable way to know which Alt is held
+                    // when pressing another key. We'll track it via a global variable.
+                    modifiers.push(window._lastAltKeyPressed || 'LALT');
+                }
+            }
+
+            // Track which modifier keys are pressed for future reference
+            if (code === 'AltLeft') window._lastAltKeyPressed = 'LALT';
+            if (code === 'AltRight') window._lastAltKeyPressed = 'RALT';
+            if (code === 'ShiftLeft') window._lastShiftKeyPressed = 'LSHIFT';
+            if (code === 'ShiftRight') window._lastShiftKeyPressed = 'RSHIFT';
+            if (code === 'ControlLeft') window._lastCtrlKeyPressed = 'LCTRL';
+            if (code === 'ControlRight') window._lastCtrlKeyPressed = 'RCTRL';
 
             // Convert to Star Citizen format
             const scKey = convertKeyCodeToSC(code, key);
 
-            // Skip if this is just a modifier key by itself - don't trigger detection for modifiers
+            // Check if this is a modifier key
             const isModifierKey = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].includes(scKey);
 
-            if (isModifierKey)
-            {
-                // Don't process modifier keys by themselves
-                return;
-            }
-
             // Build the input string (kb1_key format)
-            const inputString = `kb1_${scKey}`;
+            let inputString = `kb1_${scKey}`;
 
             // Build display name
-            const displayName = `Keyboard - ${code}`;
+            let displayName = `Keyboard - ${code}`;
+
+            // For modifiers pressed alone, don't wait for other keys - accept them immediately
+            if (isModifierKey && modifiers.length === 1 && modifiers[0].toLowerCase() === scKey)
+            {
+                // This is a modifier key pressed alone (not as a combo with other modifiers)
+                // Clear the modifier list since we're binding the modifier itself
+                modifiers.length = 0;
+            }
 
             // Create a synthetic event that matches the structure from Rust backend
             const syntheticResult = {
@@ -2160,6 +2469,31 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
                 }
                 else if (allDetectedInputs.size === 2)
                 {
+                    // Check if the first detected input is a modifier key
+                    const firstInput = Array.from(allDetectedInputs.values())[0];
+                    const isFirstModifier = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].some(mod =>
+                        firstInput.scFormattedInput.includes(mod)
+                    );
+
+                    // If first input is a modifier, automatically combine it with the second key
+                    if (isFirstModifier)
+                    {
+                        // Use the newly detected input (second key) as the primary binding
+                        // The processInput already added modifiers if they were held, so processed already has the combo
+                        stopDetection('modifier-auto-combo');
+                        clearPrimaryCountdown();
+
+                        statusEl.innerHTML = '';
+                        renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
+
+                        selectedInputKey = processed.scFormattedInput;
+                        const conflicts = await setPendingBindingSelection(processed);
+                        updateConflictDisplay(conflicts);
+
+                        // Don't show selection UI - go straight to save
+                        return;
+                    }
+
                     // Second input detected - remove confirm UI and switch to selection UI
                     clearPrimaryCountdown();
 
@@ -2379,46 +2713,67 @@ window.resetBinding = resetBinding;
 // Binding detection and conflict handling helpers
 function applyJoystickMapping(inputString, deviceUuid)
 {
-    // Use the device manager's prefix override system
+    console.log(`[KEYBINDINGS] applyJoystickMapping called with:`, {
+        inputString,
+        deviceUuid,
+        hasAutoMapping: !!deviceUuidToAutoPrefix[deviceUuid],
+        autoPrefix: deviceUuidToAutoPrefix[deviceUuid]
+    });
+
+    // Extract the backend-assigned prefix from the input (e.g., "js1" from "js1_button3")
+    const match = inputString.match(/^(js|gp)(\d+)_/);
+    if (!match)
+    {
+        console.log(`[KEYBINDINGS] No device prefix found in input: ${inputString}`);
+        return inputString;
+    }
+
+    const backendPrefix = match[1] + match[2]; // e.g., "js1"
+
+    // Step 1: Map backend prefix to auto-detected prefix using UUID
+    // The backend may assign devices in any order, but we need the "correct" order
+    let autoDetectedPrefix = backendPrefix; // Default to backend prefix
+
+    if (deviceUuid && deviceUuidToAutoPrefix[deviceUuid])
+    {
+        autoDetectedPrefix = deviceUuidToAutoPrefix[deviceUuid];
+        console.log(`[KEYBINDINGS] UUID ${deviceUuid} mapped backend prefix ${backendPrefix} -> auto-detected ${autoDetectedPrefix}`);
+    }
+    else if (deviceUuid)
+    {
+        console.warn(`[KEYBINDINGS] UUID ${deviceUuid} not found in auto-prefix mapping. Using backend prefix ${backendPrefix}.`);
+        console.warn(`[KEYBINDINGS] Available UUIDs:`, Object.keys(deviceUuidToAutoPrefix));
+    }
+
+    // Step 2: Check if there's a custom prefix override from device manager
+    let finalPrefix = autoDetectedPrefix;
+
     if (window.applyDevicePrefixOverride && deviceUuid)
     {
-        const mappedInput = window.applyDevicePrefixOverride(inputString, deviceUuid);
-        if (mappedInput !== inputString)
-        {
-            console.log(`[KEYBINDINGS] Applied device prefix override: ${inputString} -> ${mappedInput}`);
-            return mappedInput;
-        }
-    }
+        // Create a temporary input string with the auto-detected prefix to check for overrides
+        const tempInput = inputString.replace(/^(js|gp)\d+_/, `${autoDetectedPrefix}_`);
+        const overriddenInput = window.applyDevicePrefixOverride(tempInput, deviceUuid);
 
-    // Fallback: check old deviceUuidMapping (legacy support)
-    if (deviceUuid && deviceUuidMapping[deviceUuid])
-    {
-        const logicalDevice = deviceUuidMapping[deviceUuid];
-        const match = inputString.match(/^([a-z]+\d+)_/);
-        if (match)
+        if (overriddenInput !== tempInput)
         {
-            const currentPrefix = match[1];
-            if (currentPrefix !== logicalDevice)
+            const overrideMatch = overriddenInput.match(/^(js|gp\d+)_/);
+            if (overrideMatch)
             {
-                return inputString.replace(currentPrefix, logicalDevice);
+                finalPrefix = overrideMatch[1];
+                console.log(`[KEYBINDINGS] Applied custom prefix override: ${autoDetectedPrefix} -> ${finalPrefix}`);
             }
         }
     }
 
-    // Fallback: check old deviceMappings (legacy support)
-    for (const [logicalDevice, mapping] of Object.entries(deviceMappings))
+    // Apply the final prefix
+    const mappedInput = inputString.replace(/^(js|gp)\d+_/, `${finalPrefix}_`);
+
+    if (mappedInput !== inputString)
     {
-        if (mapping && mapping.detectedPrefix && mapping.detectedNum !== undefined)
-        {
-            const detectedId = mapping.detectedPrefix + mapping.detectedNum;
-            if (inputString.startsWith(detectedId + '_'))
-            {
-                return inputString.replace(detectedId, logicalDevice);
-            }
-        }
+        console.log(`[KEYBINDINGS] ✓ Final mapping: ${inputString} -> ${mappedInput}`);
     }
 
-    return inputString;
+    return mappedInput;
 }
 
 async function setPendingBindingSelection(processedInput)
@@ -2631,6 +2986,316 @@ async function applyBinding(actionMapName, actionName, mappedInput, multiTap = n
     }, 1000);
 }
 
+/**
+ * Remove a binding by clicking the X button on a binding tag
+ * Uses the same logic as the "Manage Bindings" modal remove button
+ */
+async function removeBindingTag(event, actionName, inputToClear)
+{
+    event.preventDefault();
+    event.stopPropagation();
+
+    // We need to find the action map name by searching through current keybindings
+    if (!currentKeybindings) return;
+
+    let actionMapName = null;
+    let actionToModify = null;
+
+    // Find which action map contains this action
+    for (const actionMap of currentKeybindings.action_maps)
+    {
+        const action = actionMap.actions.find(a => a.name === actionName);
+        if (action)
+        {
+            actionMapName = actionMap.name;
+            actionToModify = action;
+            break;
+        }
+    }
+
+    if (!actionMapName || !actionToModify) return;
+
+    // Use the same removeBinding function from main.js which handles confirmation
+    const removalSucceeded = await window.removeBinding(actionMapName, actionName, inputToClear);
+    if (removalSucceeded)
+    {
+        // Refresh the keybindings to update the UI
+        await refreshBindings();
+    }
+}
+
+/**
+ * Clear all bindings for all actions within an action map
+ * @param {string} actionMapName - The name of the action map (e.g., 'spaceship_general')
+ */
+async function clearAllActionMapBindings(actionMapName)
+{
+    if (!currentKeybindings) return;
+
+    // Find the action map
+    const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+    if (!actionMap)
+    {
+        console.error('Action map not found:', actionMapName);
+        return;
+    }
+
+    const actionMapLabel = actionMap.ui_label || actionMap.display_name || actionMap.name;
+
+    // Show confirmation dialog
+    const confirmed = await window.showConfirmation(
+        `Clear all bindings in "${actionMapLabel}"? This will clear bindings for ${actionMap.actions.length} actions.`,
+        'Clear All Bindings',
+        'Clear All',
+        'Cancel'
+    );
+
+    if (!confirmed) return;
+
+    try
+    {
+        // Process each action
+        for (const action of actionMap.actions)
+        {
+            if (!action.bindings || action.bindings.length === 0) continue;
+
+            // Collect input types to clear
+            const inputTypesToClear = new Set();
+            action.bindings.forEach(binding =>
+            {
+                if (binding.input && binding.input.trim())
+                {
+                    if (binding.input.startsWith('js')) inputTypesToClear.add('joystick');
+                    else if (binding.input.startsWith('kb')) inputTypesToClear.add('keyboard');
+                    else if (binding.input.startsWith('mouse')) inputTypesToClear.add('mouse');
+                    else if (binding.input.startsWith('gp')) inputTypesToClear.add('gamepad');
+                }
+            });
+
+            // Clear each input type
+            for (const inputType of inputTypesToClear)
+            {
+                let clearedInput = '';
+                switch (inputType)
+                {
+                    case 'joystick': clearedInput = 'js1_ '; break;
+                    case 'keyboard': clearedInput = 'kb1_ '; break;
+                    case 'mouse': clearedInput = 'mouse1_ '; break;
+                    case 'gamepad': clearedInput = 'gp1_ '; break;
+                }
+
+                if (clearedInput)
+                {
+                    await invoke('update_binding', {
+                        actionMapName: actionMapName,
+                        actionName: action.name,
+                        newInput: clearedInput
+                    });
+                }
+            }
+        }
+
+        // Mark as unsaved and refresh
+        hasUnsavedChanges = true;
+        if (window.updateUnsavedIndicator) window.updateUnsavedIndicator();
+        await refreshBindings();
+
+        window.showSuccessMessage(`Cleared all bindings in "${actionMapLabel}"`);
+    } catch (error)
+    {
+        console.error('Error clearing action map bindings:', error);
+        if (window.showAlert) await window.showAlert(`Error clearing bindings: ${error}`, 'Error');
+    }
+}
+
+/**
+ * Reset all bindings for all actions within an action map to their defaults
+ * @param {string} actionMapName - The name of the action map (e.g., 'spaceship_general')
+ */
+async function resetAllActionMapBindings(actionMapName)
+{
+    if (!currentKeybindings) return;
+
+    // Find the action map
+    const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+    if (!actionMap)
+    {
+        console.error('Action map not found:', actionMapName);
+        return;
+    }
+
+    const actionMapLabel = actionMap.ui_label || actionMap.display_name || actionMap.name;
+
+    // Show confirmation dialog
+    const confirmed = await window.showConfirmation(
+        `Reset all bindings in "${actionMapLabel}" to defaults? This will reset ${actionMap.actions.length} actions.`,
+        'Reset All to Defaults',
+        'Reset All',
+        'Cancel'
+    );
+
+    if (!confirmed) return;
+
+    try
+    {
+        // Process each action
+        for (const action of actionMap.actions)
+        {
+            try
+            {
+                await invoke('reset_binding', {
+                    actionMapName: actionMapName,
+                    actionName: action.name
+                });
+            } catch (resetError)
+            {
+                // If reset_binding doesn't exist, try clearing instead
+                if (resetError.toString().includes('not found'))
+                {
+                    await invoke('update_binding', {
+                        actionMapName: actionMapName,
+                        actionName: action.name,
+                        newInput: ''
+                    });
+                }
+            }
+        }
+
+        // Mark as unsaved and refresh
+        hasUnsavedChanges = true;
+        if (window.updateUnsavedIndicator) window.updateUnsavedIndicator();
+        await refreshBindings();
+
+        window.showSuccessMessage(`Reset all bindings in "${actionMapLabel}" to defaults`);
+    } catch (error)
+    {
+        console.error('Error resetting action map bindings:', error);
+        if (window.showAlert) await window.showAlert(`Error resetting bindings: ${error}`, 'Error');
+    }
+}
+
+/**
+ * Swap all joystick prefixes (js1 <-> js2) in the current keybindings.
+ * This is useful when Star Citizen flips device associations.
+ */
+async function swapJoystickPrefixes()
+{
+    if (!currentKeybindings)
+    {
+        if (window.showAlert) await window.showAlert('No keybindings loaded. Please load a keybinding file first.', 'No Keybindings');
+        return;
+    }
+
+    try
+    {
+        let swapCount = 0;
+        const tempPlaceholder = 'js_TEMP_SWAP_';
+
+        // Iterate through all action maps and their actions
+        for (const actionMap of currentKeybindings.action_maps)
+        {
+            for (const action of actionMap.actions)
+            {
+                if (!action.bindings) continue;
+
+                for (const binding of action.bindings)
+                {
+                    if (!binding.input) continue;
+
+                    const originalInput = binding.input;
+
+                    // Check if this is a js1 or js2 binding
+                    if (binding.input.match(/^js1_/i))
+                    {
+                        // First, replace js1 with a temp placeholder
+                        binding.input = binding.input.replace(/^js1_/i, tempPlaceholder);
+                        swapCount++;
+                    }
+                    else if (binding.input.match(/^js2_/i))
+                    {
+                        // Replace js2 with js1
+                        binding.input = binding.input.replace(/^js2_/i, 'js1_');
+                        swapCount++;
+                    }
+
+                    // Also update display_name if it contains the joystick prefix
+                    if (binding.display_name && originalInput !== binding.input)
+                    {
+                        if (binding.display_name.includes('Joystick 1'))
+                        {
+                            binding.display_name = binding.display_name.replace('Joystick 1', 'Joystick TEMP');
+                        }
+                        else if (binding.display_name.includes('Joystick 2'))
+                        {
+                            binding.display_name = binding.display_name.replace('Joystick 2', 'Joystick 1');
+                        }
+                    }
+                }
+            }
+        }
+
+        // Second pass: replace temp placeholder with js2
+        for (const actionMap of currentKeybindings.action_maps)
+        {
+            for (const action of actionMap.actions)
+            {
+                if (!action.bindings) continue;
+
+                for (const binding of action.bindings)
+                {
+                    if (!binding.input) continue;
+
+                    if (binding.input.startsWith(tempPlaceholder))
+                    {
+                        binding.input = binding.input.replace(tempPlaceholder, 'js2_');
+                    }
+
+                    // Also fix display_name temp placeholder
+                    if (binding.display_name && binding.display_name.includes('Joystick TEMP'))
+                    {
+                        binding.display_name = binding.display_name.replace('Joystick TEMP', 'Joystick 2');
+                    }
+                }
+            }
+        }
+
+        // Also swap the device entries if they exist
+        if (currentKeybindings.devices && currentKeybindings.devices.joysticks)
+        {
+            const joysticks = currentKeybindings.devices.joysticks;
+            if (joysticks.length >= 2)
+            {
+                // Swap the first two joysticks
+                const temp = joysticks[0];
+                joysticks[0] = joysticks[1];
+                joysticks[1] = temp;
+            }
+        }
+
+        if (swapCount > 0)
+        {
+            hasUnsavedChanges = true;
+            renderKeybindings();
+            cacheUserCustomizations();
+            window.showSuccessMessage(`Swapped ${swapCount} joystick bindings (JS1 ↔ JS2)`);
+        }
+        else
+        {
+            if (window.showAlert) await window.showAlert('No joystick bindings found to swap.', 'No Bindings');
+        }
+    }
+    catch (error)
+    {
+        console.error('Error swapping joystick prefixes:', error);
+        if (window.showAlert) await window.showAlert(`Error swapping prefixes: ${error}`, 'Error');
+    }
+}
+
+// Make action map functions globally available
+window.clearAllActionMapBindings = clearAllActionMapBindings;
+window.resetAllActionMapBindings = resetAllActionMapBindings;
+window.swapJoystickPrefixes = swapJoystickPrefixes;
+
 // Make conflict functions globally available
 window.showConflictModal = showConflictModal;
 window.closeConflictModal = closeConflictModal;
@@ -2650,6 +3315,8 @@ window.setBindingSaveEnabled = setBindingSaveEnabled;
 window.loadCategoryMappings = loadCategoryMappings;
 window.refreshBindings = refreshBindings;
 window.stopDetection = stopDetection;
+window.removeBindingTag = removeBindingTag;
+window.buildDeviceUuidMapping = buildDeviceUuidMapping;
 
 // Make state variables globally available
 window.getShowUnboundActions = () => showUnboundActions;
@@ -2666,6 +3333,8 @@ window.getHasUnsavedChanges = () => hasUnsavedChanges;
 window.setHasUnsavedChanges = (value) => { hasUnsavedChanges = value; };
 window.getIgnoreModalMouseInputs = () => ignoreModalMouseInputs;
 window.setIgnoreModalMouseInputs = (value) => { ignoreModalMouseInputs = value; };
+window.getIsDetectionActive = () => isDetectionActive;
+window.isBindingModalOpen = () => bindingMode;
 
 /**
  * Toggle the visibility of an action map's actions list

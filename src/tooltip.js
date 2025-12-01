@@ -1,5 +1,8 @@
 export class Tooltip
 {
+    // Static property to globally enable/disable all tooltips
+    static enabled = true;
+
     constructor(element, text)
     {
         this.element = element;
@@ -12,6 +15,8 @@ export class Tooltip
 
     show()
     {
+        // Don't show if tooltips are globally disabled
+        if (!Tooltip.enabled) return;
         this.tooltip = document.createElement('div');
         this.tooltip.className = 'custom-tooltip';
         this.tooltip.textContent = this.text;
