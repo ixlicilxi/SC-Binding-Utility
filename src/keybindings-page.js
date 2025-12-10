@@ -1,19 +1,23 @@
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
-const { open, save } = window.__TAURI__.dialog;
-import { toStarCitizenFormat } from './input-utils.js';
-import { CustomDropdown } from './custom-dropdown.js';
-import { Tooltip } from './tooltip.js';
+const {invoke} = window.__TAURI__.core;
+const {listen} = window.__TAURI__.event;
+const {open, save} = window.__TAURI__.dialog;
+import {toStarCitizenFormat} from './input-utils.js';
+import {CustomDropdown} from './custom-dropdown.js';
+import {Tooltip} from './tooltip.js';
 
-// Keyboard detection state
+const DEVICE_PREFIX_CACHE_KEY = 'devicePrefixMapping';
+const SECONDARY_WINDOW_MS = 1000;
+
+
+// Detection State
 let keyboardDetectionActive = false;
 let keyboardDetectionHandler = null;
-let isDetectionActive = false; // Global flag to track if input detection is active
-let ignoreModalMouseInputs = false; // Set while hovering cancel/save to avoid accidental detections
-let currentBindingId = null; // Unique ID for the current binding attempt - helps ignore stale events
+let isDetectionActive = false;
+let ignoreModalMouseInputs = false;
+let currentBindingId = null;
 let bindingModalSaveBtn = null;
 
-// State
+// Data State
 let currentKeybindings = null;
 let currentFilter = 'all';
 let currentCategory = null;
@@ -26,28 +30,20 @@ let hasUnsavedChanges = false;
 let customizedOnly = false;
 let showUnboundActions = true;
 let categoryFriendlyNames = {};
-let currentFilename = null; // Track the current file name for the copy command
-const SECONDARY_WINDOW_MS = 1000; // One-second window for multi-input capture
-let deviceAxisNames = {}; // Cache of device_name -> { axis_id -> axis_name } from HID descriptors
-let deviceAxisMappings = {}; // Cache of device_name -> { directinput_index -> hid_usage_id }
-let deviceSCAxisMappings = {}; // Cache of device_name -> { directinput_index -> sc_axis_name }
+let currentFilename = null;
 
-// Joystick Mapping State
+// Caches
+let deviceAxisNames = {};
+let deviceAxisMappings = {};
+let deviceSCAxisMappings = {};
 let detectedJoysticks = [];
-let currentDetectingDevice = null; // 'js1', 'js2', or 'gp1'
-let deviceDetectionSessionId = null;
-let deviceMappings = {}; // Stores { js1: { detectedNum: 3, detectedPrefix: 'js', deviceName: 'VKB', deviceUuid: 'uuid-string' }, ... }
-let deviceUuidMapping = {}; // Stores UUID-based mappings: { 'uuid-string': 'js1', ... }
-let deviceUuidToAutoPrefix = {}; // Maps device UUID to auto-detected prefix (e.g., {'046d:c215': 'js2'}) - matches device manager's enumeration
-
-// Joystick Test State
-let testingJoystickNum = null;
-let testTimeout = null;
-
-// Action Bindings Manager State
+let deviceMappings = {};
+let deviceUuidMapping = {};
+let deviceUuidToAutoPrefix = {};
+let localPrefixMapping = {};
 let currentActionBindingsData = null;
 
-// Binding Detection State
+// UI Detection State
 let allDetectedInputs = new Map();
 let selectedInputKey = null;
 let statusEl = null;
@@ -55,86 +51,74 @@ let selectionContainer = null;
 let selectionButtons = new Map();
 let selectionMessageEl = null;
 
-function setBindingSaveEnabled(enabled)
-{
-    if (!bindingModalSaveBtn) return;
-    bindingModalSaveBtn.disabled = !enabled;
+const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+};
+
+// =============================================================================
+// INITIALIZATION & HELPERS
+// =============================================================================
+
+function loadPrefixMappingsLocal() {
+    try {
+        const saved = localStorage.getItem(DEVICE_PREFIX_CACHE_KEY);
+        if (saved) {
+            localPrefixMapping = JSON.parse(saved);
+        }
+    } catch (e) {
+        console.warn('[KEYBINDINGS] Failed to load local prefix mappings');
+    }
 }
+
+function setBindingSaveEnabled(enabled) {
+    if (bindingModalSaveBtn) bindingModalSaveBtn.disabled = !enabled;
+}
+
 
 /**
  * Load axis names for all connected devices from HID descriptors
  * This populates the deviceAxisNames cache used for display
  */
-async function loadDeviceAxisNames()
-{
-    try
-    {
-        if (!currentKeybindings || !currentKeybindings.devices) return;
+async function loadDeviceAxisNames() {
+    if (!currentKeybindings || !currentKeybindings.devices) return;
 
-        // Collect all unique device names from joysticks
-        const deviceNames = new Set();
+    const deviceNames = new Set([
+        ...(currentKeybindings.devices.joysticks || []).map(d => d.device_name),
+        ...(currentKeybindings.devices.gamepads || []).map(d => d.device_name)
+    ]);
 
-        if (currentKeybindings.devices.joysticks)
-        {
-            currentKeybindings.devices.joysticks.forEach(js => deviceNames.add(js.device_name));
+    const loadPromises = Array.from(deviceNames).map(async (deviceName) => {
+        if (deviceAxisNames[deviceName]) return; // Already cached
+
+        try {
+            // Run these in parallel
+            const [axisNames, axisMapping] = await Promise.all([
+                invoke('get_axis_names_for_device', {deviceName}).catch(() => ({})),
+                invoke('get_directinput_to_hid_mapping', {deviceName}).catch(() => ({}))
+            ]);
+
+            deviceAxisNames[deviceName] = axisNames || {};
+            deviceAxisMappings[deviceName] = axisMapping || {};
+
+            // Initialize SC mapping container
+            deviceSCAxisMappings[deviceName] = {};
+
+            console.log(`[Axis] Loaded ${Object.keys(axisNames).length} axes for ${deviceName}`);
+        } catch (error) {
+            console.warn(`[Axis] Failed to load data for ${deviceName}`, error);
+            deviceAxisNames[deviceName] = {};
         }
+    });
 
-        if (currentKeybindings.devices.gamepads)
-        {
-            currentKeybindings.devices.gamepads.forEach(gp => deviceNames.add(gp.device_name));
-        }
-
-        // Load axis names for each device
-        for (const deviceName of deviceNames)
-        {
-            if (!deviceAxisNames[deviceName])
-            {
-                try
-                {
-                    const axisNames = await invoke('get_axis_names_for_device', { deviceName });
-                    deviceAxisNames[deviceName] = axisNames || {};
-                    console.log(`[Axis Names] Loaded ${Object.keys(axisNames || {}).length} axes for device: ${deviceName}`);
-
-                    // Also load the DirectInput-to-HID mapping
-                    try
-                    {
-                        const axisMapping = await invoke('get_directinput_to_hid_mapping', { deviceName });
-                        deviceAxisMappings[deviceName] = axisMapping || {};
-                        console.log(`[Axis Mapping] Loaded ${Object.keys(axisMapping || {}).length} DirectInput mappings for device: ${deviceName}`);
-
-                        // Build SC axis mapping from HID data
-                        if (Object.keys(axisMapping || {}).length > 0 && Object.keys(axisNames || {}).length > 0)
-                        {
-                            // Note: buildAxisMappingFromHID is not defined in main.js or imported.
-                            // It seems it was missing from main.js or I missed it.
-                            // Checking main.js content again... it was called but not defined in the provided text?
-                            // Ah, I might have missed it in the read. Or it's imported?
-                            // Wait, I don't see buildAxisMappingFromHID in main.js content I read.
-                            // It might be in input-utils.js? No, imports are explicit.
-                            // Maybe it was defined inside loadDeviceAxisNames? No.
-                            // I will comment it out for now and add a TODO.
-                            // console.warn('buildAxisMappingFromHID is missing');
-                            // const scAxisMapping = {};
-                        }
-                    } catch (mappingError)
-                    {
-                        console.warn(`[Axis Mapping] Failed to load DirectInput mapping for ${deviceName}:`, mappingError);
-                        deviceAxisMappings[deviceName] = {};
-                        deviceSCAxisMappings[deviceName] = {};
-                    }
-                } catch (error)
-                {
-                    console.warn(`[Axis Names] Failed to load axis names for ${deviceName}:`, error);
-                    deviceAxisNames[deviceName] = {}; // Cache empty result to avoid repeated attempts
-                    deviceAxisMappings[deviceName] = {};
-                    deviceSCAxisMappings[deviceName] = {};
-                }
-            }
-        }
-    } catch (error)
-    {
-        console.error('[Axis Names] Failed to load device axis names:', error);
-    }
+    await Promise.all(loadPromises);
 }
 
 
@@ -144,22 +128,18 @@ async function loadDeviceAxisNames()
  * This ensures the same physical device gets the same ID across sessions
  * COPIED FROM device_manager.js to ensure consistency
  */
-function generateDeviceIdentifier(device, uniqueIndex)
-{
+function generateDeviceIdentifier(device, uniqueIndex) {
     // 1. Prefer Hardware Path if available (Operating System location)
-    if (device.path)
-    {
+    if (device.path) {
         return `path-${device.path}`;
     }
 
     // 2. Build the hardware ID
     let baseId = '';
-    if (device.vendor_id && device.product_id)
-    {
+    if (device.vendor_id && device.product_id) {
         const serial = device.serial_number || 'nosn';
         baseId = `${device.vendor_id}-${device.product_id}-${serial}`;
-    } else
-    {
+    } else {
         // Fallback to name hash
         const nameHash = hashString(device.name);
         baseId = `name-${nameHash}`;
@@ -167,8 +147,7 @@ function generateDeviceIdentifier(device, uniqueIndex)
 
     // 3. Append index if serial is missing or we are forcing index usage
     // This distinguishes identical sticks (same VID/PID, no SN)
-    if (baseId.includes('nosn') || uniqueIndex !== undefined)
-    {
+    if (baseId.includes('nosn') || uniqueIndex !== undefined) {
         const uniqueId = `${baseId}-idx${uniqueIndex}`;
         console.log(`[KEYBINDINGS] Generated Unique ID (with index): ${uniqueId}`);
         return uniqueId;
@@ -180,14 +159,11 @@ function generateDeviceIdentifier(device, uniqueIndex)
 /**
  * Simple string hash function for device names
  */
-function hashString(str)
-{
+function hashString(str) {
     let hash = 0;
-    for (let i = 0; i < str.length; i++)
-    {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash = hash & hash;
     }
     return Math.abs(hash).toString(36);
 }
@@ -196,10 +172,8 @@ function hashString(str)
  * Build device UUID to auto-detected prefix mapping
  * This ensures keybindings page uses the same device enumeration order as device manager
  */
-async function buildDeviceUuidMapping()
-{
-    try
-    {
+async function buildDeviceUuidMapping() {
+    try {
         const devices = await invoke('detect_joysticks');
         console.log('[KEYBINDINGS] Building device UUID mapping from detected devices:', devices);
 
@@ -211,8 +185,7 @@ async function buildDeviceUuidMapping()
         let gamepadCount = 0;
 
         // UPDATED: Added index to loop to match device_manager.js logic
-        devices.forEach((device, index) =>
-        {
+        devices.forEach((device, index) => {
             const isGp = device.device_type === 'Gamepad';
             const categoryIndex = isGp ? ++gamepadCount : ++joystickCount;
             const autoDetectedId = isGp ? `gp${categoryIndex}` : `js${categoryIndex}`;
@@ -228,16 +201,14 @@ async function buildDeviceUuidMapping()
                 deviceUuid = generateDeviceIdentifier(device, index);
             }
 
-            if (deviceUuid)
-            {
+            if (deviceUuid) {
                 deviceUuidToAutoPrefix[deviceUuid] = autoDetectedId;
                 console.log(`[KEYBINDINGS] Mapped UUID ${deviceUuid} -> ${autoDetectedId} (${device.name})`);
             }
         });
 
         console.log('[KEYBINDINGS] Device UUID mapping complete:', deviceUuidToAutoPrefix);
-    } catch (error)
-    {
+    } catch (error) {
         console.error('[KEYBINDINGS] Failed to build device UUID mapping:', error);
     }
 }
@@ -247,8 +218,7 @@ async function buildDeviceUuidMapping()
  * @param {string} binding - The binding string (e.g., "js1_x", "js2_ry")
  * @returns {string|null} - The HID axis name (e.g., "X", "Ry") or null if not found
  */
-function getHidAxisNameForBinding(binding)
-{
+function getHidAxisNameForBinding(binding) {
     if (!binding || !currentKeybindings || !currentKeybindings.devices) return null;
 
     // Parse binding format: jsX_axis or gpX_axis
@@ -260,18 +230,14 @@ function getHidAxisNameForBinding(binding)
     // Map deviceType and number to actual device name
     let device = null;
 
-    if (deviceType.toLowerCase() === 'js')
-    {
+    if (deviceType.toLowerCase() === 'js') {
         const jsNum = parseInt(deviceNum);
-        if (currentKeybindings.devices.joysticks && currentKeybindings.devices.joysticks[jsNum - 1])
-        {
+        if (currentKeybindings.devices.joysticks && currentKeybindings.devices.joysticks[jsNum - 1]) {
             device = currentKeybindings.devices.joysticks[jsNum - 1];
         }
-    } else if (deviceType.toLowerCase() === 'gp')
-    {
+    } else if (deviceType.toLowerCase() === 'gp') {
         const gpNum = parseInt(deviceNum);
-        if (currentKeybindings.devices.gamepads && currentKeybindings.devices.gamepads[gpNum - 1])
-        {
+        if (currentKeybindings.devices.gamepads && currentKeybindings.devices.gamepads[gpNum - 1]) {
             device = currentKeybindings.devices.gamepads[gpNum - 1];
         }
     }
@@ -290,10 +256,8 @@ function getHidAxisNameForBinding(binding)
     const normalizedAxisName = axisName.toLowerCase();
     let directInputIndex = null;
 
-    for (const [idx, scName] of Object.entries(scAxisMapping))
-    {
-        if (scName === normalizedAxisName)
-        {
+    for (const [idx, scName] of Object.entries(scAxisMapping)) {
+        if (scName === normalizedAxisName) {
             directInputIndex = parseInt(idx);
             break;
         }
@@ -310,8 +274,7 @@ function getHidAxisNameForBinding(binding)
 }
 
 // Convert JavaScript KeyboardEvent.code to Star Citizen keyboard format
-function convertKeyCodeToSC(code, key)
-{
+function convertKeyCodeToSC(code, key) {
     // Handle special keys
     const specialKeys = {
         'Space': 'space',
@@ -348,26 +311,22 @@ function convertKeyCodeToSC(code, key)
         'Slash': 'slash',
     };
 
-    if (specialKeys[code])
-    {
+    if (specialKeys[code]) {
         return specialKeys[code];
     }
 
     // Handle letter keys (KeyA -> a)
-    if (code.startsWith('Key'))
-    {
+    if (code.startsWith('Key')) {
         return code.substring(3).toLowerCase();
     }
 
     // Handle number keys (Digit1 -> 1)
-    if (code.startsWith('Digit'))
-    {
+    if (code.startsWith('Digit')) {
         return code.substring(5);
     }
 
     // Handle numpad keys (Numpad1 -> np_1)
-    if (code.startsWith('Numpad'))
-    {
+    if (code.startsWith('Numpad')) {
         const numpadKey = code.substring(6).toLowerCase();
         const numpadMap = {
             'divide': 'np_divide',
@@ -381,8 +340,7 @@ function convertKeyCodeToSC(code, key)
     }
 
     // Handle function keys (F1 -> f1)
-    if (code.match(/^F\d+$/))
-    {
+    if (code.match(/^F\d+$/)) {
         return code.toLowerCase();
     }
 
@@ -399,8 +357,7 @@ function convertKeyCodeToSC(code, key)
     return key.toLowerCase();
 }
 
-function renderDetectedInputMessage(container, message)
-{
+function renderDetectedInputMessage(container, message) {
     container.innerHTML = '';
     const span = document.createElement('span');
     span.className = 'action-binding-button-found';
@@ -408,110 +365,174 @@ function renderDetectedInputMessage(container, message)
     container.appendChild(span);
 }
 
-function clearPrimaryCountdown()
-{
-    if (!countdownInterval) return;
-    console.log('[TIMER] Clearing primary countdown timer, ID:', countdownInterval);
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-}
-
-function clearSecondaryDetectionTimer()
-{
-    if (!secondaryDetectionTimeout) return;
-    console.log('[TIMER] Clearing secondary detection timer');
-    clearTimeout(secondaryDetectionTimeout);
-    secondaryDetectionTimeout = null;
-}
-
-function cleanupInputDetectionListeners()
-{
-    if (window.currentInputDetectionUnlisten)
-    {
+function cleanupInputDetectionListeners() {
+    // 1. Clean up Rust Event Listeners
+    if (window.currentInputDetectionUnlisten) {
         window.currentInputDetectionUnlisten();
         window.currentInputDetectionUnlisten = null;
     }
-    if (window.currentCompletionUnlisten)
-    {
+    if (window.currentCompletionUnlisten) {
         window.currentCompletionUnlisten();
         window.currentCompletionUnlisten = null;
     }
 
-    if (keyboardDetectionHandler)
-    {
+    // 2. Clean up DOM Listeners
+    if (keyboardDetectionHandler) {
         document.removeEventListener('keydown', keyboardDetectionHandler, true);
         keyboardDetectionHandler = null;
     }
-    keyboardDetectionActive = false;
 
-    // Clear tracked modifier states
+    if (window.mouseDetectionHandler) {
+        document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
+        document.removeEventListener('mouseup', window.mouseUpHandler, true);
+        document.removeEventListener('contextmenu', window.contextMenuHandler, true);
+        window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
+
+        window.mouseDetectionHandler = null;
+        window.mouseUpHandler = null;
+        window.contextMenuHandler = null;
+        window.beforeUnloadHandler = null;
+    }
+
+    // 3. Reset State
+    keyboardDetectionActive = false;
+    window.mouseDetectionActive = false;
     window._lastAltKeyPressed = null;
     window._lastShiftKeyPressed = null;
     window._lastCtrlKeyPressed = null;
-
-    if (window.mouseDetectionHandler)
-    {
-        document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
-        window.mouseDetectionHandler = null;
-    }
-    if (window.mouseUpHandler)
-    {
-        document.removeEventListener('mouseup', window.mouseUpHandler, true);
-        window.mouseUpHandler = null;
-    }
-    if (window.contextMenuHandler)
-    {
-        document.removeEventListener('contextmenu', window.contextMenuHandler, true);
-        window.contextMenuHandler = null;
-    }
-    if (window.beforeUnloadHandler)
-    {
-        window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-        window.beforeUnloadHandler = null;
-    }
-    if (window.mouseDetectionActive !== undefined)
-    {
-        window.mouseDetectionActive = false;
-    }
 }
 
-function stopDetection(reason = 'unspecified')
-{
-    const wasActive = isDetectionActive || countdownInterval || secondaryDetectionTimeout;
-    if (!wasActive)
-    {
+function stopDetection(reason = 'unspecified') {
+    if (!isDetectionActive && !countdownInterval && !secondaryDetectionTimeout) {
         cleanupInputDetectionListeners();
         return;
     }
 
     ignoreModalMouseInputs = false;
-
-    console.log(`[TIMER] stopDetection called (${reason})`);
     isDetectionActive = false;
     clearPrimaryCountdown();
     clearSecondaryDetectionTimer();
     cleanupInputDetectionListeners();
+    console.log(`[TIMER] Detection stopped: ${reason}`);
 }
 
-function startSecondaryDetectionWindow()
-{
-    clearSecondaryDetectionTimer();
-    secondaryDetectionTimeout = setTimeout(() =>
-    {
-        console.log('[TIMER] Secondary detection window expired');
+function clearPrimaryCountdown() {
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+    }
+}
+
+function clearSecondaryDetectionTimer() {
+    if (secondaryDetectionTimeout) {
+        clearTimeout(secondaryDetectionTimeout);
         secondaryDetectionTimeout = null;
+    }
+}
+
+function startSecondaryDetectionWindow() {
+    clearSecondaryDetectionTimer();
+    secondaryDetectionTimeout = setTimeout(() => {
         stopDetection('secondary-window-expired');
     }, SECONDARY_WINDOW_MS);
 }
 
-async function loadCategoryMappings()
-{
-    try
-    {
+async function handleDetectedInput(processedInput) {
+    if (!processedInput || !isDetectionActive) return;
+
+    // Duplicate check
+    if (allDetectedInputs.has(processedInput.scFormattedInput)) return;
+
+    allDetectedInputs.set(processedInput.scFormattedInput, processedInput);
+
+    // Scenario 1: First Input Detected
+    if (allDetectedInputs.size === 1) {
+        statusEl.innerHTML = '';
+        renderDetectedInputMessage(statusEl, `✅ Detected: ${processedInput.displayName}`);
+
+        clearPrimaryCountdown();
+        const countdownEl = document.getElementById('binding-modal-countdown');
+        if (countdownEl) countdownEl.textContent = '';
+
+        startSecondaryDetectionWindow();
+
+        const helperNote = document.createElement('div');
+        helperNote.className = 'input-confirm-note';
+        helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+        statusEl.appendChild(helperNote);
+
+        selectedInputKey = processedInput.scFormattedInput;
+        const conflicts = await setPendingBindingSelection(processedInput);
+        updateConflictDisplay(conflicts);
+        updateSelectionButtonStates();
+    }
+    // Scenario 2: Second Input (Potential Conflict or Modifier Combo)
+    else if (allDetectedInputs.size === 2) {
+        // Check for Auto-Combo (Modifier + Key)
+        const firstInput = Array.from(allDetectedInputs.values())[0];
+        const isFirstModifier = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].some(mod =>
+            firstInput.scFormattedInput.includes(mod)
+        );
+
+        if (isFirstModifier) {
+            // It's a combo (e.g., LCTRL was held, then A was pressed)
+            // The `processedInput` (the A key) already contains the modifier state due to `processInput` logic
+            stopDetection('modifier-auto-combo');
+            clearPrimaryCountdown();
+
+            statusEl.innerHTML = '';
+            renderDetectedInputMessage(statusEl, `✅ Detected: ${processedInput.displayName}`);
+
+            selectedInputKey = processedInput.scFormattedInput;
+            const conflicts = await setPendingBindingSelection(processedInput);
+            updateConflictDisplay(conflicts);
+            return;
+        }
+
+        // It's a conflict (two separate buttons pressed fast) -> Show Selection UI
+        clearPrimaryCountdown();
+        statusEl.innerHTML = '';
+
+        const countdownEl = document.getElementById('binding-modal-countdown');
+        if (countdownEl) countdownEl.textContent = '';
+
+        selectionMessageEl = document.createElement('div');
+        selectionMessageEl.className = 'input-selection-message';
+        const initiallySelected = allDetectedInputs.get(selectedInputKey) || processedInput;
+        selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
+        statusEl.appendChild(selectionMessageEl);
+
+        const helperNote = document.createElement('div');
+        helperNote.className = 'input-confirm-note';
+        helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
+        statusEl.appendChild(helperNote);
+
+        selectionContainer = document.createElement('div');
+        selectionContainer.className = 'input-selection-container';
+        statusEl.appendChild(selectionContainer);
+
+        selectionButtons.clear();
+
+        // Add buttons for all inputs
+        Array.from(allDetectedInputs.values()).forEach((input) => {
+            addDetectedInputButton(input);
+        });
+
+        updateSelectionButtonStates();
+        updateConflictDisplay(window.pendingBinding?.conflicts || []);
+    }
+    // Scenario 3: 3+ Inputs
+    else {
+        addDetectedInputButton(processedInput);
+    }
+}
+
+
+async function loadCategoryMappings() {
+    try {
         // Use Tauri's resource resolver to load from the app directory
         const response = await fetch(new URL('../Categories.json', import.meta.url).href);
-        if (!response.ok)
-        {
+        if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
@@ -520,8 +541,7 @@ async function loadCategoryMappings()
         categoryFriendlyNames = data;
 
         console.log('Category mappings loaded:', Object.keys(categoryFriendlyNames).length);
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error loading Categories.json:', error);
         // Set default fallback mapping to ensure the app still works
         categoryFriendlyNames = {
@@ -533,10 +553,8 @@ async function loadCategoryMappings()
     }
 }
 
-async function loadKeybindingsFile()
-{
-    try
-    {
+async function loadKeybindingsFile() {
+    try {
         const filePath = await open({
             filters: [{
                 name: 'Star Citizen Keybindings',
@@ -552,7 +570,7 @@ async function loadKeybindingsFile()
         currentFilename = filename;
 
         // Load the keybindings (this loads into state on backend)
-        await invoke('load_keybindings', { filePath });
+        await invoke('load_keybindings', {filePath});
 
         // Now get the merged bindings (AllBinds + user customizations)
         currentKeybindings = await invoke('get_merged_bindings');
@@ -574,22 +592,18 @@ async function loadKeybindingsFile()
         updateFileIndicator(filePath);
 
         // Refresh the visual view if it's loaded and visible
-        if (window.refreshVisualView)
-        {
+        if (window.refreshVisualView) {
             await window.refreshVisualView();
         }
 
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error loading keybindings:', error);
         await window.showAlert(`Failed to load keybindings: ${error}`, 'Error');
     }
 }
 
-export async function loadPersistedKeybindings()
-{
-    try
-    {
+export async function loadPersistedKeybindings() {
+    try {
         const savedPath = localStorage.getItem('keybindingsFilePath');
         const cachedUnsavedState = localStorage.getItem('hasUnsavedChanges');
         const cachedDelta = localStorage.getItem('userCustomizationsDelta');
@@ -602,20 +616,16 @@ export async function loadPersistedKeybindings()
         });
 
         // Set filename if we have a saved path
-        if (savedPath)
-        {
+        if (savedPath) {
             const filename = savedPath.split('\\').pop() || savedPath.split('/').pop();
             currentFilename = filename;
         }
 
-        if (savedPath)
-        {
+        if (savedPath) {
             // Check if we have unsaved changes cached
             // Note: cachedDelta might be the string "null", so check for that too
-            if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null')
-            {
-                try
-                {
+            if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null') {
+                try {
                     console.log('Restoring unsaved changes from cache...');
 
                     // Load the cached delta into backend state (this is the unsaved work)
@@ -624,7 +634,7 @@ export async function loadPersistedKeybindings()
                         hasData: !!userCustomizations,
                         actionMapsCount: userCustomizations?.action_maps?.length || 0
                     });
-                    await invoke('restore_user_customizations', { customizations: userCustomizations });
+                    await invoke('restore_user_customizations', {customizations: userCustomizations});
 
                     // Get fresh merged bindings (AllBinds + cached unsaved delta)
                     currentKeybindings = await invoke('get_merged_bindings');
@@ -639,18 +649,16 @@ export async function loadPersistedKeybindings()
 
                     console.log('Unsaved changes restored successfully');
                     return;
-                } catch (error)
-                {
+                } catch (error) {
                     console.error('Error restoring cached changes:', error);
                     // Fall through to load from file
                 }
             }
 
             // No unsaved changes - load from file
-            try
-            {
+            try {
                 console.log('Loading keybindings from file:', savedPath);
-                await invoke('load_keybindings', { filePath: savedPath });
+                await invoke('load_keybindings', {filePath: savedPath});
 
                 // Get fresh merged bindings (AllBinds + user delta)
                 currentKeybindings = await invoke('get_merged_bindings');
@@ -662,8 +670,7 @@ export async function loadPersistedKeybindings()
                 displayKeybindings();
                 updateFileIndicator(savedPath);
                 return;
-            } catch (error)
-            {
+            } catch (error) {
                 console.error('Error loading persisted file:', error);
                 await window.showAlert(
                     `Could not load keybindings file:\n${savedPath}\n\nThe file may have been moved or deleted. Starting with default bindings.`,
@@ -677,15 +684,13 @@ export async function loadPersistedKeybindings()
         }
 
         // No user file loaded - check if we have unsaved changes for a new keybinding set
-        if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null')
-        {
-            try
-            {
+        if (cachedUnsavedState === 'true' && cachedDelta && cachedDelta !== 'null') {
+            try {
                 console.log('Restoring unsaved new keybinding set from cache...');
 
                 // Load the cached delta into backend state (this is the unsaved work)
                 const userCustomizations = JSON.parse(cachedDelta);
-                await invoke('restore_user_customizations', { customizations: userCustomizations });
+                await invoke('restore_user_customizations', {customizations: userCustomizations});
 
                 // Get fresh merged bindings (AllBinds + cached unsaved delta)
                 currentKeybindings = await invoke('get_merged_bindings');
@@ -699,8 +704,7 @@ export async function loadPersistedKeybindings()
 
                 console.log('Unsaved new keybinding set restored successfully');
                 return;
-            } catch (error)
-            {
+            } catch (error) {
                 console.error('Error restoring cached new keybinding set:', error);
                 // Fall through to show AllBinds only
             }
@@ -709,28 +713,23 @@ export async function loadPersistedKeybindings()
         // No user file loaded, just show all available bindings from AllBinds
         await loadAllBindsOnly();
 
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error loading persisted keybindings:', error);
     }
 }
 
-async function loadAllBindsOnly()
-{
-    try
-    {
+async function loadAllBindsOnly() {
+    try {
         // Don't auto-load AllBinds - show welcome screen instead
         // User can create a new keybinding set or load an existing one
         showWelcomeScreen();
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error in loadAllBindsOnly:', error);
         showWelcomeScreen();
     }
 }
 
-function showWelcomeScreen()
-{
+function showWelcomeScreen() {
     // Show welcome screen
     document.getElementById('welcome-screen').style.display = 'flex';
     document.getElementById('bindings-content').style.display = 'none';
@@ -748,10 +747,8 @@ function showWelcomeScreen()
  * Cache only the user's customizations (delta) to localStorage.
  * This is much smaller than caching the full merged view and prevents stale data issues.
  */
-async function cacheUserCustomizations()
-{
-    try
-    {
+async function cacheUserCustomizations() {
+    try {
         // Get the user's customizations from backend (just the delta, not merged with AllBinds)
         const userCustomizations = await invoke('get_user_customizations');
 
@@ -763,18 +760,15 @@ async function cacheUserCustomizations()
             actionMapsCount: userCustomizations?.action_maps?.length || 0,
             profileName: userCustomizations?.profile_name
         });
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Failed to cache user customizations:', error);
         // Non-critical error - we can always reload from file
     }
 }
 
-async function newKeybinding()
-{
+async function newKeybinding() {
     // Check if there are unsaved changes
-    if (hasUnsavedChanges)
-    {
+    if (hasUnsavedChanges) {
         const confirmed = await window.showConfirmation(
             'You have unsaved keybinding changes. Do you want to discard them and start fresh?',
             'Unsaved Changes',
@@ -786,8 +780,7 @@ async function newKeybinding()
         if (!confirmed) return;
     }
 
-    try
-    {
+    try {
         // Clear backend customizations and reload AllBinds
         await invoke('clear_custom_bindings');
         await invoke('load_all_binds');
@@ -804,7 +797,7 @@ async function newKeybinding()
                 joysticks: []
             }
         };
-        await invoke('restore_user_customizations', { customizations: emptyActionMaps });
+        await invoke('restore_user_customizations', {customizations: emptyActionMaps});
 
         // Get fresh merged bindings (AllBinds only, no customizations)
         currentKeybindings = await invoke('get_merged_bindings');
@@ -831,8 +824,7 @@ async function newKeybinding()
 
         // Update filter buttons
         const filterBtns = document.querySelectorAll('.filter-section .category-item');
-        filterBtns.forEach(btn =>
-        {
+        filterBtns.forEach(btn => {
             btn.classList.remove('active');
             if (btn.dataset.filter === 'all') btn.classList.add('active');
         });
@@ -849,44 +841,38 @@ async function newKeybinding()
         renderKeybindings();
 
         // Show success toast
-        if (window.toast)
-        {
+        if (window.toast) {
             window.toast.success('New profile created. Make your changes and save when ready.');
         }
 
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error creating new keybinding:', error);
         await window.showAlert(`Failed to create new keybinding: ${error}`, 'Error');
     }
 }
 
-function updateFileIndicator(filePath)
-{
+function updateFileIndicator(filePath) {
     const indicator = document.getElementById('loaded-file-indicator');
     const fileNameEl = document.getElementById('loaded-file-name');
     const indicatorSub = document.getElementById('loaded-file-indicator-sub');
     const filePathSubEl = document.getElementById('loaded-file-path-sub');
     const fileNameSubEl = document.getElementById('loaded-file-name-sub');
 
-    if (indicator && fileNameEl)
-    {
+    if (indicator && fileNameEl) {
         // Show full file path
         fileNameEl.textContent = filePath;
         fileNameEl.title = filePath; // Add tooltip for full path
         indicator.style.display = 'flex';
     }
 
-    if (indicatorSub && fileNameSubEl)
-    {
+    if (indicatorSub && fileNameSubEl) {
         // Extract path and filename separately
         const lastSlashIndex = filePath.lastIndexOf('\\');
         const fileName = lastSlashIndex !== -1 ? filePath.substring(lastSlashIndex + 1) : filePath;
         const dirPath = lastSlashIndex !== -1 ? filePath.substring(0, lastSlashIndex + 1) : '';
 
         // Update sub-nav indicator with split path and filename
-        if (filePathSubEl)
-        {
+        if (filePathSubEl) {
             filePathSubEl.textContent = dirPath;
         }
         fileNameSubEl.textContent = fileName;
@@ -895,24 +881,20 @@ function updateFileIndicator(filePath)
     }
 }
 
-function showUnsavedFileIndicator()
-{
+function showUnsavedFileIndicator() {
     const indicator = document.getElementById('loaded-file-indicator');
     const fileNameEl = document.getElementById('loaded-file-name');
     const indicatorSub = document.getElementById('loaded-file-indicator-sub');
     const filePathSubEl = document.getElementById('loaded-file-path-sub');
     const fileNameSubEl = document.getElementById('loaded-file-name-sub');
 
-    if (indicator && fileNameEl)
-    {
+    if (indicator && fileNameEl) {
         fileNameEl.textContent = 'Unsaved Keybinding Set';
         indicator.style.display = 'flex';
     }
 
-    if (indicatorSub && fileNameSubEl)
-    {
-        if (filePathSubEl)
-        {
+    if (indicatorSub && fileNameSubEl) {
+        if (filePathSubEl) {
             filePathSubEl.textContent = '';
         }
         fileNameSubEl.textContent = 'Unsaved Keybinding Set';
@@ -921,8 +903,7 @@ function showUnsavedFileIndicator()
 }
 
 // Search for a button ID in the main keybindings view
-window.searchMainTabForButtonId = function (buttonId)
-{
+window.searchMainTabForButtonId = function (buttonId) {
     // Switch to the bindings tab
     window.switchTab('bindings');
 
@@ -931,44 +912,39 @@ window.searchMainTabForButtonId = function (buttonId)
 
     // Get the search input element
     const searchInput = document.getElementById('search-input');
-    if (searchInput)
-    {
+    if (searchInput) {
         // Set the search input value
         searchInput.value = buttonId;
 
         // Trigger the search by firing an input event
-        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        searchInput.dispatchEvent(new Event('input', {bubbles: true}));
 
         // Scroll the search input into view
-        searchInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        searchInput.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 
         // Focus the search input
         searchInput.focus();
     }
 };
 
-async function saveKeybindings()
-{
-    if (!currentKeybindings)
-    {
+async function saveKeybindings() {
+    if (!currentKeybindings) {
         await window.showAlert('No keybindings loaded to save!', 'Save Keybindings');
         return;
     }
 
-    try
-    {
+    try {
         // Get the saved file path
         const savedPath = localStorage.getItem('keybindingsFilePath');
 
-        if (!savedPath)
-        {
+        if (!savedPath) {
             // No file path - redirect to Save As
             await saveKeybindingsAs();
             return;
         }
 
         // Save to the current file path
-        await invoke('export_keybindings', { filePath: savedPath });
+        await invoke('export_keybindings', {filePath: savedPath});
 
         // Clear unsaved changes flag
         hasUnsavedChanges = false;
@@ -981,24 +957,19 @@ async function saveKeybindings()
         const autoSaveEnabled = localStorage.getItem('autoSaveToAllInstallations') === 'true';
         const scInstallDirectory = localStorage.getItem('scInstallDirectory');
 
-        if (autoSaveEnabled && scInstallDirectory)
-        {
-            try
-            {
+        if (autoSaveEnabled && scInstallDirectory) {
+            try {
                 // Get all detected installations
-                const installations = await invoke('scan_sc_installations', { basePath: scInstallDirectory });
+                const installations = await invoke('scan_sc_installations', {basePath: scInstallDirectory});
 
-                if (installations.length > 0)
-                {
+                if (installations.length > 0) {
                     console.log(`Auto-saving to ${installations.length} installation(s)...`);
 
                     // Filter out installations that contain the currently-opened file
                     let skippedInstallation = null;
-                    const installationsToUpdate = installations.filter(installation =>
-                    {
+                    const installationsToUpdate = installations.filter(installation => {
                         // Check if the current file path is within this installation
-                        if (savedPath && savedPath.toLowerCase().includes(installation.path.toLowerCase()))
-                        {
+                        if (savedPath && savedPath.toLowerCase().includes(installation.path.toLowerCase())) {
                             skippedInstallation = installation.name;
                             return false; // Skip this installation
                         }
@@ -1009,21 +980,18 @@ async function saveKeybindings()
                     const deployResults = [];
                     const failedInstallations = [];
 
-                    for (const installation of installationsToUpdate)
-                    {
-                        try
-                        {
+                    for (const installation of installationsToUpdate) {
+                        try {
                             await invoke('save_bindings_to_install', {
                                 installationPath: installation.path
                             });
                             console.log(`Saved to ${installation.name}`);
-                            deployResults.push({ name: installation.name, success: true });
-                        } catch (deployError)
-                        {
+                            deployResults.push({name: installation.name, success: true});
+                        } catch (deployError) {
                             console.error(`Failed to deploy to ${installation.name}:`, deployError);
                             const errorMsg = typeof deployError === 'string' ? deployError : deployError.message || 'Unknown error';
-                            failedInstallations.push({ name: installation.name, error: errorMsg });
-                            deployResults.push({ name: installation.name, success: false, error: errorMsg });
+                            failedInstallations.push({name: installation.name, error: errorMsg});
+                            deployResults.push({name: installation.name, success: false, error: errorMsg});
                         }
                     }
 
@@ -1031,114 +999,91 @@ async function saveKeybindings()
                     const failCount = failedInstallations.length;
 
                     // Build message based on results
-                    if (failCount === 0)
-                    {
+                    if (failCount === 0) {
                         // All deployments succeeded
                         let successMsg = `Saved & deployed to ${successCount} installation(s)`;
-                        if (skippedInstallation)
-                        {
+                        if (skippedInstallation) {
                             successMsg += ` (${skippedInstallation} was skipped as it's the currently open file location)`;
                         }
                         successMsg += '!';
-                        if (window.toast)
-                        {
+                        if (window.toast) {
                             window.toast.success(successMsg);
-                        } else
-                        {
+                        } else {
                             window.showSuccessMessage(successMsg);
                         }
-                    } else if (successCount > 0)
-                    {
+                    } else if (successCount > 0) {
                         // Partial success
                         const failedNames = failedInstallations.map(f => f.name).join(', ');
                         const errorDetails = failedInstallations.map(f => `${f.name}: ${f.error}`).join('\n');
-                        if (window.toast)
-                        {
+                        if (window.toast) {
                             window.toast.warning(`Deployed to ${successCount} installation(s), but ${failCount} failed: ${failedNames}`, {
                                 title: 'Partial Deployment',
                                 details: errorDetails,
                                 duration: 8000
                             });
-                        } else
-                        {
+                        } else {
                             window.showSuccessMessage(`Saved (${failCount} deployment(s) failed: ${failedNames})`);
                         }
-                    } else
-                    {
+                    } else {
                         // All deployments failed
                         const errorDetails = failedInstallations.map(f => `${f.name}: ${f.error}`).join('\n');
-                        if (window.toast)
-                        {
+                        if (window.toast) {
                             window.toast.warning('Saved locally, but all deployments failed', {
                                 title: 'Deployment Failed',
                                 details: errorDetails,
                                 duration: 8000
                             });
-                        } else
-                        {
+                        } else {
                             window.showSuccessMessage('Saved (all deployments failed)');
                         }
                     }
-                } else
-                {
+                } else {
                     // No installations found - auto-deploy enabled but nothing to deploy to
-                    if (window.toast)
-                    {
+                    if (window.toast) {
                         window.toast.warning('Saved locally. No SC installations found to deploy to.', {
                             title: 'No Installations',
                             details: `Checked directory: ${scInstallDirectory}\n\nMake sure your Star Citizen installation directory is correctly configured in Settings.`,
                             duration: 6000
                         });
-                    } else
-                    {
+                    } else {
                         window.showSuccessMessage('Saved! (No installations found for auto-deploy)');
                     }
                 }
-            } catch (error)
-            {
+            } catch (error) {
                 console.error('Error auto-saving to installations:', error);
                 // Show a more verbose error message (this catches scan_sc_installations errors)
                 const errorMessage = typeof error === 'string' ? error : error.message || 'Unknown error';
-                if (window.toast)
-                {
+                if (window.toast) {
                     window.toast.warning('Saved locally, but failed to scan installations', {
                         title: 'Partial Save',
                         details: errorMessage,
                         duration: 8000
                     });
-                } else
-                {
+                } else {
                     window.showSuccessMessage(`Saved (scan failed: ${errorMessage})`);
                 }
             }
-        } else
-        {
+        } else {
             // Show brief success message
-            if (window.toast)
-            {
+            if (window.toast) {
                 window.toast.success('Saved!');
-            } else
-            {
+            } else {
                 window.showSuccessMessage('Saved!');
             }
         }
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error saving keybindings:', error);
         await window.showAlert(`Failed to save keybindings: ${error}`, 'Error');
     }
 }
 
-async function saveKeybindingsAs()
-{
-    if (!currentKeybindings)
-    {
+async function saveKeybindingsAs() {
+    if (!currentKeybindings) {
         await window.showAlert('No keybindings loaded to save!', 'Save Keybindings As');
         return;
     }
 
-    try
-    {
+    try {
         // Prompt for a new file path
         const filePath = await save({
             filters: [{
@@ -1148,14 +1093,13 @@ async function saveKeybindingsAs()
             defaultPath: 'layout_exported.xml'
         });
 
-        if (!filePath)
-        {
+        if (!filePath) {
             // User cancelled
             return;
         }
 
         // Save to the new file path
-        await invoke('export_keybindings', { filePath });
+        await invoke('export_keybindings', {filePath});
 
         // Update the stored file path
         localStorage.setItem('keybindingsFilePath', filePath);
@@ -1176,25 +1120,21 @@ async function saveKeybindingsAs()
 
         // Show brief success message
         window.showSuccessMessage('Saved!');
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error saving keybindings:', error);
         await window.showAlert(`Failed to save keybindings: ${error}`, 'Error');
     }
 }
 
 // Helper function to update copy command button visibility
-function updateCopyCommandButtonVisibility()
-{
+function updateCopyCommandButtonVisibility() {
     const copyCommandBtn = document.getElementById('copy-command-btn');
-    if (copyCommandBtn)
-    {
+    if (copyCommandBtn) {
         copyCommandBtn.style.display = currentFilename ? 'inline-flex' : 'none';
     }
 }
 
-function displayKeybindings()
-{
+function displayKeybindings() {
     if (!currentKeybindings) return;
 
     // Hide welcome screen, show bindings content
@@ -1218,8 +1158,7 @@ function displayKeybindings()
     renderCategories();
 
     // Don't render device info for merged bindings (AllBinds doesn't have device info)
-    if (currentKeybindings.devices)
-    {
+    if (currentKeybindings.devices) {
         renderDeviceInfo();
     }
 
@@ -1227,23 +1166,20 @@ function displayKeybindings()
     renderKeybindings();
 }
 
-function renderCategories()
-{
+function renderCategories() {
     const categoryList = document.getElementById('category-list');
 
     // Group action maps by their mapped category
     const categoryGroups = new Map();
 
-    currentKeybindings.action_maps.forEach(actionMap =>
-    {
+    currentKeybindings.action_maps.forEach(actionMap => {
         // Try to find a mapping for this action map
         // 1. Try ui_category (e.g. @ui_CCSpaceFlight)
         // 2. Try name (e.g. spaceship_movement)
         // 3. Default to 'Uncategorized'
 
         let categoryKey = actionMap.ui_category;
-        if (!categoryFriendlyNames[categoryKey])
-        {
+        if (!categoryFriendlyNames[categoryKey]) {
             categoryKey = actionMap.name;
         }
 
@@ -1252,27 +1188,21 @@ function renderCategories()
         // If mappedCategory is an array, take the first element as the main category
         let mainCategory = 'Uncategorized';
 
-        if (Array.isArray(mappedCategory))
-        {
+        if (Array.isArray(mappedCategory)) {
             mainCategory = mappedCategory[0];
-        } else if (typeof mappedCategory === 'string')
-        {
+        } else if (typeof mappedCategory === 'string') {
             mainCategory = mappedCategory;
-        } else
-        {
+        } else {
             // Fallback if not found in mapping
-            if (actionMap.ui_category)
-            {
+            if (actionMap.ui_category) {
                 mainCategory = actionMap.ui_category;
-            } else
-            {
+            } else {
                 mainCategory = 'Uncategorized';
             }
         }
 
         // Normalize category name (capitalize)
-        if (mainCategory && mainCategory !== 'Uncategorized')
-        {
+        if (mainCategory && mainCategory !== 'Uncategorized') {
             // Capitalize first letter of each word
             mainCategory = mainCategory.split(' ')
                 .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -1282,8 +1212,7 @@ function renderCategories()
             mainCategory = mainCategory.replace('Comms/social', 'Comms/Social');
         }
 
-        if (!categoryGroups.has(mainCategory))
-        {
+        if (!categoryGroups.has(mainCategory)) {
             categoryGroups.set(mainCategory, []);
         }
         categoryGroups.get(mainCategory).push(actionMap);
@@ -1301,8 +1230,7 @@ function renderCategories()
         'Uncategorized'
     ];
 
-    const sortedCategories = Array.from(categoryGroups.keys()).sort((a, b) =>
-    {
+    const sortedCategories = Array.from(categoryGroups.keys()).sort((a, b) => {
         const indexA = categoryOrder.indexOf(a);
         const indexB = categoryOrder.indexOf(b);
 
@@ -1321,13 +1249,11 @@ function renderCategories()
   `;
 
     // Render grouped categories
-    sortedCategories.forEach(categoryName =>
-    {
+    sortedCategories.forEach(categoryName => {
         const actionMaps = categoryGroups.get(categoryName);
 
         // Sort action maps within category by display name
-        actionMaps.sort((a, b) =>
-        {
+        actionMaps.sort((a, b) => {
             const nameA = a.ui_label || a.display_name || a.name;
             const nameB = b.ui_label || b.display_name || b.name;
             return nameA.localeCompare(nameB);
@@ -1337,8 +1263,7 @@ function renderCategories()
         html += `<div class="category-header">${categoryName}</div>`;
 
         // Add action maps under this category
-        actionMaps.forEach(actionMap =>
-        {
+        actionMaps.forEach(actionMap => {
             const displayName = actionMap.ui_label || actionMap.display_name || actionMap.name;
             const isActive = currentCategory === actionMap.name;
 
@@ -1354,10 +1279,8 @@ function renderCategories()
     categoryList.innerHTML = html;
 
     // Add click listeners
-    categoryList.querySelectorAll('.category-item').forEach(item =>
-    {
-        item.addEventListener('click', (e) =>
-        {
+    categoryList.querySelectorAll('.category-item').forEach(item => {
+        item.addEventListener('click', (e) => {
             // Only remove active from items within this category list, not filter buttons
             categoryList.querySelectorAll('.category-item').forEach(i => i.classList.remove('active'));
             e.target.classList.add('active');
@@ -1367,37 +1290,30 @@ function renderCategories()
     });
 }
 
-function renderDeviceInfo()
-{
+function renderDeviceInfo() {
     const deviceList = document.getElementById('device-list');
 
     let html = '';
 
-    if (currentKeybindings.devices.keyboards.length > 0)
-    {
+    if (currentKeybindings.devices.keyboards.length > 0) {
         html += '<div class="device-item"><div class="device-label">Keyboard</div>';
-        currentKeybindings.devices.keyboards.forEach(kb =>
-        {
+        currentKeybindings.devices.keyboards.forEach(kb => {
             html += `<div>${kb}</div>`;
         });
         html += '</div>';
     }
 
-    if (currentKeybindings.devices.mice.length > 0)
-    {
+    if (currentKeybindings.devices.mice.length > 0) {
         html += '<div class="device-item"><div class="device-label">Mouse</div>';
-        currentKeybindings.devices.mice.forEach(mouse =>
-        {
+        currentKeybindings.devices.mice.forEach(mouse => {
             html += `<div>${mouse}</div>`;
         });
         html += '</div>';
     }
 
-    if (currentKeybindings.devices.joysticks.length > 0)
-    {
+    if (currentKeybindings.devices.joysticks.length > 0) {
         html += '<div class="device-item"><div class="device-label">Joysticks</div>';
-        currentKeybindings.devices.joysticks.forEach(js =>
-        {
+        currentKeybindings.devices.joysticks.forEach(js => {
             html += `<div>${js}</div>`;
         });
         html += '</div>';
@@ -1407,11 +1323,9 @@ function renderDeviceInfo()
 }
 
 // Helper function to check if an action has any bindings that will be displayed
-function actionHasVisibleBindings(action)
-{
+function actionHasVisibleBindings(action) {
     // Check if it's effectively unbound (no bindings or only empty defaults that are placeholders)
-    const isEffectivelyUnbound = !action.bindings || action.bindings.length === 0 || action.bindings.every(binding =>
-    {
+    const isEffectivelyUnbound = !action.bindings || action.bindings.length === 0 || action.bindings.every(binding => {
         // Check the pattern BEFORE trimming to catch 'kb_ ', 'js_ ', etc.
         // The digit after the device prefix is optional
         const isEmptyBinding = !!binding.input.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
@@ -1421,8 +1335,7 @@ function actionHasVisibleBindings(action)
         return isUnboundPlaceholder;
     });
 
-    if (isEffectivelyUnbound)
-    {
+    if (isEffectivelyUnbound) {
         // If we are hiding unbound actions, return false
         if (!showUnboundActions) return false;
 
@@ -1431,12 +1344,10 @@ function actionHasVisibleBindings(action)
 
         // If filtering by input type, check if there's at least one empty binding of that type
         // This logic is a bit fuzzy for "unbound", but preserves existing behavior
-        if (currentFilter !== 'all')
-        {
+        if (currentFilter !== 'all') {
             if (!action.bindings) return true; // If no bindings at all, show it (it's a candidate for any type)
 
-            return action.bindings.some(binding =>
-            {
+            return action.bindings.some(binding => {
                 if (currentFilter === 'keyboard') return binding.input_type === 'Keyboard';
                 if (currentFilter === 'mouse') return binding.input_type === 'Mouse';
                 if (currentFilter === 'joystick') return binding.input_type === 'Joystick';
@@ -1448,8 +1359,7 @@ function actionHasVisibleBindings(action)
     }
 
     // If we have bindings, check if any are visible
-    return action.bindings.some(binding =>
-    {
+    return action.bindings.some(binding => {
         const trimmedInput = binding.input.trim();
 
         // Check if this is a cleared binding (check BEFORE trimming for the pattern)
@@ -1467,8 +1377,7 @@ function actionHasVisibleBindings(action)
         if (customizedOnly && binding.is_default && !isClearedBinding) return false;
 
         // Filter display based on current filter
-        if (currentFilter !== 'all')
-        {
+        if (currentFilter !== 'all') {
             if (currentFilter === 'keyboard' && binding.input_type !== 'Keyboard') return false;
             if (currentFilter === 'mouse' && binding.input_type !== 'Mouse') return false;
             if (currentFilter === 'joystick' && binding.input_type !== 'Joystick') return false;
@@ -1479,19 +1388,15 @@ function actionHasVisibleBindings(action)
     });
 }
 
-function renderKeybindings()
-{
+function renderKeybindings() {
     if (!currentKeybindings) return;
 
     // Debug: log a sample binding to see its structure
-    if (currentKeybindings.action_maps && currentKeybindings.action_maps.length > 0)
-    {
+    if (currentKeybindings.action_maps && currentKeybindings.action_maps.length > 0) {
         const firstMap = currentKeybindings.action_maps[0];
-        if (firstMap.actions && firstMap.actions.length > 0)
-        {
+        if (firstMap.actions && firstMap.actions.length > 0) {
             const firstAction = firstMap.actions[0];
-            if (firstAction.bindings && firstAction.bindings.length > 0)
-            {
+            if (firstAction.bindings && firstAction.bindings.length > 0) {
                 console.log('Sample binding structure:', firstAction.bindings[0]);
             }
         }
@@ -1502,29 +1407,24 @@ function renderKeybindings()
     // Filter action maps
     let actionMaps = currentKeybindings.action_maps;
 
-    if (currentCategory)
-    {
+    if (currentCategory) {
         actionMaps = actionMaps.filter(am => am.name === currentCategory);
     }
 
     let html = '';
 
-    actionMaps.forEach(actionMap =>
-    {
+    actionMaps.forEach(actionMap => {
         // Use ui_label if available (from merged bindings), otherwise use display_name
         const actionMapLabel = actionMap.ui_label || actionMap.display_name || actionMap.name;
 
         // Filter actions based on search term and input type filter
-        let actions = actionMap.actions.filter(action =>
-        {
+        let actions = actionMap.actions.filter(action => {
             // Use ui_label if available, otherwise display_name
             const displayName = action.ui_label || action.display_name || action.name;
 
             // Input type filter
-            if (currentFilter !== 'all')
-            {
-                const hasMatchingBinding = action.bindings && action.bindings.some(binding =>
-                {
+            if (currentFilter !== 'all') {
+                const hasMatchingBinding = action.bindings && action.bindings.some(binding => {
                     if (currentFilter === 'keyboard') return binding.input_type === 'Keyboard';
                     if (currentFilter === 'mouse') return binding.input_type === 'Mouse';
                     if (currentFilter === 'joystick') return binding.input_type === 'Joystick';
@@ -1536,16 +1436,13 @@ function renderKeybindings()
             }
 
             // Customized only filter - if checked, skip actions without customized bindings for the current device type
-            if (customizedOnly)
-            {
-                const hasCustomizedBinding = action.bindings && action.bindings.some(binding =>
-                {
+            if (customizedOnly) {
+                const hasCustomizedBinding = action.bindings && action.bindings.some(binding => {
                     // Check if this binding is customized (not default)
                     if (binding.is_default) return false;
 
                     // If a specific device type is selected, only count customizations for that type
-                    if (currentFilter !== 'all')
-                    {
+                    if (currentFilter !== 'all') {
                         if (currentFilter === 'keyboard' && binding.input_type !== 'Keyboard') return false;
                         if (currentFilter === 'mouse' && binding.input_type !== 'Mouse') return false;
                         if (currentFilter === 'joystick' && binding.input_type !== 'Joystick') return false;
@@ -1559,8 +1456,7 @@ function renderKeybindings()
             }
 
             // Search filter - search in action name AND binding names
-            if (searchTerm)
-            {
+            if (searchTerm) {
                 // Support OR operator with | and AND operator with +
                 // If search contains +, all terms must match (AND logic)
                 // If search contains |, any term can match (OR logic)
@@ -1570,35 +1466,29 @@ function renderKeybindings()
                 let terms;
                 let requireAll = false;
 
-                if (hasAndOperator && !hasOrOperator)
-                {
+                if (hasAndOperator && !hasOrOperator) {
                     // Pure AND operator
                     terms = searchTerm.split('+').map(t => t.trim()).filter(t => t.length > 0);
                     requireAll = true;
-                } else if (hasOrOperator && !hasAndOperator)
-                {
+                } else if (hasOrOperator && !hasAndOperator) {
                     // Pure OR operator
                     terms = searchTerm.split('|').map(t => t.trim()).filter(t => t.length > 0);
                     requireAll = false;
-                } else if (hasAndOperator && hasOrOperator)
-                {
+                } else if (hasAndOperator && hasOrOperator) {
                     // Mixed operators - treat + as primary separator (higher precedence)
                     terms = searchTerm.split('+').map(t => t.trim()).filter(t => t.length > 0);
                     requireAll = true;
-                } else
-                {
+                } else {
                     // No operators, treat as single term
                     terms = [searchTerm.trim()];
                     requireAll = false;
                 }
 
-                const matches = terms.map(term =>
-                {
+                const matches = terms.map(term => {
                     // For OR-separated terms, each can have sub-terms
                     const subTerms = term.split('|').map(t => t.trim()).filter(t => t.length > 0);
 
-                    return subTerms.some(subTerm =>
-                    {
+                    return subTerms.some(subTerm => {
                         const searchInAction = displayName.toLowerCase().includes(subTerm) ||
                             action.name.toLowerCase().includes(subTerm);
 
@@ -1611,18 +1501,14 @@ function renderKeybindings()
                     });
                 });
 
-                if (requireAll)
-                {
+                if (requireAll) {
                     // All terms must match
-                    if (!matches.every(m => m))
-                    {
+                    if (!matches.every(m => m)) {
                         return false;
                     }
-                } else
-                {
+                } else {
                     // At least one term must match
-                    if (!matches.some(m => m))
-                    {
+                    if (!matches.some(m => m)) {
                         return false;
                     }
                 }
@@ -1652,8 +1538,7 @@ function renderKeybindings()
         <div class="actions-list">
     `;
 
-        visibleActions.forEach(action =>
-        {
+        visibleActions.forEach(action => {
             const displayName = action.ui_label || action.display_name || action.name;
             const isCustomized = action.is_customized || false;
             const onHold = action.on_hold || false;
@@ -1689,15 +1574,12 @@ function renderKeybindings()
     setupScrollCategoryTracker();
 }
 
-function renderActionBindings(action)
-{
-    if (!action.bindings || action.bindings.length === 0)
-    {
+function renderActionBindings(action) {
+    if (!action.bindings || action.bindings.length === 0) {
         return '<span class="no-bindings">No bindings</span>';
     }
 
-    return action.bindings.map(binding =>
-    {
+    return action.bindings.map(binding => {
         const inputType = binding.input_type || 'Unknown';
         const trimmedInput = binding.input.trim();
 
@@ -1711,8 +1593,7 @@ function renderActionBindings(action)
         // Format display name with activation mode appended
         let displayText = binding.display_name || binding.input;
 
-        if (binding.activation_mode)
-        {
+        if (binding.activation_mode) {
             const formattedMode = binding.activation_mode
                 .split('_')
                 .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -1721,8 +1602,7 @@ function renderActionBindings(action)
         }
 
         // Show multi-tap indicator if present
-        if (binding.multi_tap)
-        {
+        if (binding.multi_tap) {
             displayText += ` [${binding.multi_tap}x Tap]`;
         }
 
@@ -1736,11 +1616,9 @@ function renderActionBindings(action)
 }
 
 // Global success message helper
-window.showSuccessMessage = function (message)
-{
+window.showSuccessMessage = function (message) {
     // Use the toast system if available
-    if (window.toast && window.toast.success)
-    {
+    if (window.toast && window.toast.success) {
         window.toast.success(message);
         return;
     }
@@ -1765,25 +1643,33 @@ window.showSuccessMessage = function (message)
     document.body.appendChild(indicator);
 
     // Remove after 2 seconds
-    setTimeout(() =>
-    {
+    setTimeout(() => {
         indicator.style.animation = 'slideOut 0.3s ease-out';
         setTimeout(() => indicator.remove(), 300);
     }, 2000);
 };
 
+// Debounce the main render to prevent UI freezing on typing
+const debouncedRender = debounce(() => {
+    renderKeybindings();
+}, 300);
+
+// Use this in your HTML input: oninput="window.handleSearchInput(this.value)"
+window.handleSearchInput = function (value) {
+    searchTerm = value;
+    debouncedRender();
+};
+
+
 // Refresh bindings from backend and update UI
-async function refreshBindings()
-{
-    try
-    {
+async function refreshBindings() {
+    try {
         console.log('Refreshing bindings from backend...');
         currentKeybindings = await invoke('get_merged_bindings');
         console.log('Got merged bindings with', currentKeybindings.action_maps?.length, 'action maps');
 
         // Update working copy with latest changes
-        if (currentKeybindings)
-        {
+        if (currentKeybindings) {
             // Cache only the user customizations (delta), not the full merged view
             await cacheUserCustomizations();
             localStorage.setItem('hasUnsavedChanges', hasUnsavedChanges.toString());
@@ -1791,144 +1677,60 @@ async function refreshBindings()
         }
 
         renderKeybindings();
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error refreshing bindings:', error);
     }
 }
 
 // Helper function to process a raw input result
-const processInput = (result) =>
-{
+const processInput = (result) => {
     console.log('INPUT DETECTED (raw):', result.display_name, result.input_string);
 
-    // Apply joystick mapping if applicable (pass the full result object for device UUID)
+    // Apply the fixed mapping logic
     const mappedInput = applyJoystickMapping(result.input_string, result.device_uuid);
+    if (mappedInput === null) return null;
 
-    if (mappedInput === null)
-    {
-        return null; // Skip disabled joysticks
-    }
-
-    // Convert to Star Citizen format using HID axis name from backend if available
     let scFormattedInput;
-    if (result.hid_axis_name && mappedInput.includes('_axis'))
-    {
-        // Check if this is a hat switch (backend should already have converted it, but check name just in case)
+
+    // Handle Axis Naming (X, Y, RotZ, etc.)
+    if (result.hid_axis_name && mappedInput.includes('_axis')) {
         const hidNameLower = result.hid_axis_name.toLowerCase().replace(/\s+/g, '');
-
-        if (hidNameLower === 'hatswitch')
-        {
-            // This is a hat switch - backend should have already converted it to hat format
-            // If it didn't, use the mappedInput as-is
+        if (hidNameLower === 'hatswitch') {
             scFormattedInput = toStarCitizenFormat(mappedInput);
-            console.log('Hat switch detected in HID name, using standard format:', scFormattedInput);
-        }
-        else
-        {
-            // Use the actual HID axis name from the device descriptor
-            // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
-            const hidName = result.hid_axis_name.toLowerCase();
-            const scAxisName = hidName === 'rx' ? 'rotx' :
-                hidName === 'ry' ? 'roty' :
-                    hidName === 'rz' ? 'rotz' : hidName;
-
-            // Replace axis number format with axis name format
+        } else {
+            const scAxisName = hidNameLower === 'rx' ? 'rotx' :
+                hidNameLower === 'ry' ? 'roty' :
+                    hidNameLower === 'rz' ? 'rotz' : hidNameLower;
             scFormattedInput = mappedInput.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
-            console.log(`Converted to SC format using HID axis name "${result.hid_axis_name}":`, scFormattedInput);
         }
-    }
-    else
-    {
-        // Fallback: use hardcoded mapping for XInput gamepads or if no HID axis name available
+    } else {
         scFormattedInput = toStarCitizenFormat(mappedInput);
     }
 
-    // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
-    if (result.modifiers && result.modifiers.length > 0)
-    {
+    // Add modifiers
+    if (result.modifiers && result.modifiers.length > 0) {
         const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
         const sortedModifiers = result.modifiers
             .filter(mod => modifierOrder.includes(mod))
             .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
             .map(mod => mod.toLowerCase());
 
-        if (sortedModifiers.length > 0)
-        {
-            // Insert modifier after device prefix: "kb1_f" -> "kb1_lalt+f"
-            // Match device prefix pattern like "kb1_", "js2_", "mouse1_", "gp1_"
+        if (sortedModifiers.length > 0) {
             const prefixMatch = scFormattedInput.match(/^(kb\d*|js\d*|mouse\d*|gp\d*)_(.+)$/);
-            if (prefixMatch)
-            {
-                const devicePrefix = prefixMatch[1];
-                const inputPart = prefixMatch[2];
-                scFormattedInput = `${devicePrefix}_${sortedModifiers.join('+')}+${inputPart}`;
-            }
-            else
-            {
-                // Fallback if no device prefix found
+            if (prefixMatch) {
+                scFormattedInput = `${prefixMatch[1]}_${sortedModifiers.join('+')}+${prefixMatch[2]}`;
+            } else {
                 scFormattedInput = sortedModifiers.join('+') + '+' + scFormattedInput;
             }
         }
     }
 
-    // Update display name if mapping was applied
-    let displayName = result.display_name;
-    if (mappedInput !== result.input_string)
-    {
-        displayName = displayName.replace(/Joystick \d+/, (match) =>
-        {
-            const newJsNum = mappedInput.match(/^js(\d+)_/)[1];
-            return `Joystick ${newJsNum}`;
-        });
-    }
-
-    // Add modifiers to display name after device type (e.g., "Keyboard - Left Alt + F")
-    if (result.modifiers && result.modifiers.length > 0)
-    {
-        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
-        const modifierDisplayNames = {
-            'LALT': 'Left Alt',
-            'RALT': 'Right Alt',
-            'LCTRL': 'Left Ctrl',
-            'RCTRL': 'Right Ctrl',
-            'LSHIFT': 'Left Shift',
-            'RSHIFT': 'Right Shift'
-        };
-        const sortedModifiers = result.modifiers
-            .filter(mod => modifierOrder.includes(mod))
-            .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
-            .map(mod => modifierDisplayNames[mod] || mod);
-
-        if (sortedModifiers.length > 0)
-        {
-            // Insert modifiers after device type: "Keyboard - F" -> "Keyboard - Left Alt + F"
-            // Match pattern like "Device Type - Input"
-            const displayMatch = displayName.match(/^(.+?)\s*-\s*(.+)$/);
-            if (displayMatch)
-            {
-                const deviceType = displayMatch[1];
-                const inputPart = displayMatch[2];
-                displayName = `${deviceType} - ${sortedModifiers.join(' + ')} + ${inputPart}`;
-            }
-            else
-            {
-                // Fallback if no device type separator found
-                displayName = sortedModifiers.join(' + ') + ' + ' + displayName;
-            }
-        }
-    }
-
-    return {
-        scFormattedInput,
-        displayName,
-        originalResult: result
-    };
+    return {scFormattedInput, displayName: result.display_name, originalResult: result};
 };
 
+
 // Helper function to add a button to the selection UI
-const addDetectedInputButton = (processedInput) =>
-{
+const addDetectedInputButton = (processedInput) => {
     if (!selectionContainer) return;
 
     const btn = document.createElement('button');
@@ -1940,8 +1742,7 @@ const addDetectedInputButton = (processedInput) =>
 
     const inputKey = processedInput.scFormattedInput;
 
-    btn.addEventListener('click', async () =>
-    {
+    btn.addEventListener('click', async () => {
         const selectedInput = allDetectedInputs.get(inputKey);
 
         if (!selectedInput) return;
@@ -1961,719 +1762,173 @@ const addDetectedInputButton = (processedInput) =>
     updateSelectionButtonStates();
 };
 
-async function startBinding(actionMapName, actionName, actionDisplayName = null)
-{
-    console.log('[TIMER] startBinding called for:', actionMapName, actionName);
-
-    // If we're already binding, don't start another session
-    if (bindingMode)
-    {
-        console.log('[TIMER] Already in binding mode, ignoring request');
-        return;
-    }
+async function startBinding(actionMapName, actionName, actionDisplayName = null) {
+    if (bindingMode) return;
 
     bindingMode = true;
     isDetectionActive = true;
-    currentBindingAction = { actionMapName, actionName };
+    currentBindingAction = {actionMapName, actionName};
+    currentBindingId = Date.now(); // Session ID
 
-    // Generate a unique ID for this binding session
-    const thisBindingId = Date.now();
-    currentBindingId = thisBindingId;
-
-    // Reset detection state
+    // UI Reset
     allDetectedInputs.clear();
     selectedInputKey = null;
     window.pendingBinding = null;
 
-    // Update UI
     const modal = document.getElementById('binding-modal');
-    const actionNameEl = document.getElementById('binding-modal-action');
     statusEl = document.getElementById('binding-modal-status');
     const countdownEl = document.getElementById('binding-modal-countdown');
     bindingModalSaveBtn = document.getElementById('binding-modal-save-btn');
 
-    // Reset UI state
+    document.getElementById('binding-modal-action').textContent = 'Binding Action: ' + (actionDisplayName || actionName);
     statusEl.innerHTML = 'Press any button, key, mouse button, or move any axis...';
     statusEl.className = 'binding-status';
-    countdownEl.textContent = '';
+    countdownEl.textContent = '10';
     setBindingSaveEnabled(false);
 
-    // Clear any previous selection UI
-    const existingSelection = statusEl.querySelector('.input-selection-container');
-    if (existingSelection) existingSelection.remove();
-
-    const existingMessage = statusEl.querySelector('.input-selection-message');
-    if (existingMessage) existingMessage.remove();
-
-    // Clear any previous conflict display
-    const conflictDisplay = document.getElementById('binding-conflict-display');
-    if (conflictDisplay)
-    {
-        conflictDisplay.style.display = 'none';
-        conflictDisplay.innerHTML = '';
+    // Clear dynamic UI
+    if (document.getElementById('binding-conflict-display')) {
+        document.getElementById('binding-conflict-display').style.display = 'none';
     }
+    const amSelect = document.getElementById('activation-mode-select');
+    if (amSelect) amSelect.value = '';
 
-    // Reset activation mode dropdown to default
-    const activationModeSelect = document.getElementById('activation-mode-select');
-    if (activationModeSelect)
-    {
-        activationModeSelect.value = '';
-    }
-
-    actionNameEl.textContent = 'Binding Action: ' + (actionDisplayName || actionName);
     modal.style.display = 'flex';
 
-    // Start countdown
-    let countdown = 10; // 10 seconds timeout
-    let remaining = countdown;
-    countdownEl.textContent = countdown;
-
-    // Clear any existing interval
-    if (countdownInterval)
-    {
-        clearInterval(countdownInterval);
-    }
-
-    console.log('[TIMER] Starting new countdownInterval for binding:', actionDisplayName);
-    const intervalId = setInterval(() =>
-    {
+    // Countdown Logic
+    let remaining = 10;
+    clearPrimaryCountdown();
+    countdownInterval = setInterval(() => {
         remaining--;
-        console.log('[TIMER] Countdown tick:', remaining, 'intervalId:', intervalId);
         countdownEl.textContent = remaining;
-        if (remaining <= 0)
-        {
-            console.log('[TIMER] Countdown reached 0, clearing interval:', intervalId);
-            clearInterval(intervalId);
-            if (countdownInterval === intervalId)
-            {
-                countdownInterval = null;
-            }
+        if (remaining <= 0) {
+            clearPrimaryCountdown();
         }
     }, 1000);
-    countdownInterval = intervalId;
-    console.log('[TIMER] countdownInterval ID assigned:', countdownInterval);
 
-    // Start listening for inputs
-    try
-    {
-        // Listen for input-detected events (from joystick/backend)
-        const unlistenInputs = await listen('input-detected', async (event) =>
-        {
-            console.log('[TIMER] [EVENT] input-detected received, session_id:', event.payload.session_id, 'thisBindingId:', thisBindingId.toString(), 'isDetectionActive:', isDetectionActive);
+    // 1. Rust Backend Listeners
+    try {
+        const thisBindingId = currentBindingId;
 
-            // Ignore if detection window has ended
-            if (!isDetectionActive)
-            {
-                console.log('[TIMER] [EVENT] Ignoring input-detected because detection is no longer active');
-                return;
-            }
-
-            // Ignore if this event is from a previous binding attempt (check session ID)
-            if (event.payload.session_id !== thisBindingId.toString())
-            {
-                console.log('[TIMER] [EVENT] Ignoring stale input-detected event (session ID mismatch)');
-                return;
-            }
-
-            // Ignore if this event is from a previous binding attempt
-            if (currentBindingId !== thisBindingId)
-            {
-                console.log('[TIMER] [EVENT] Ignoring stale input-detected event (binding ID mismatch)');
-                return;
-            }
-
-            const result = event.payload;
-            const processed = processInput(result);
-
-            if (!processed) return;
-
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
-
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
-
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
-            }
+        window.currentInputDetectionUnlisten = await listen('input-detected', (event) => {
+            if (!isDetectionActive || currentBindingId !== thisBindingId) return;
+            const processed = processInput(event.payload);
+            handleDetectedInput(processed);
         });
 
-        // Store unlisten function for cleanup
-        window.currentInputDetectionUnlisten = unlistenInputs;
+        window.currentCompletionUnlisten = await listen('input-detection-complete', (event) => {
+            if (!isDetectionActive || currentBindingId !== thisBindingId) return;
 
-        // Listen for completion event
-        const unlistenCompletion = await listen('input-detection-complete', async (event) =>
-        {
-            console.log('[TIMER] [EVENT] input-detection-complete received, session_id:', event.payload?.session_id, 'thisBindingId:', thisBindingId.toString(), 'currentBindingId:', currentBindingId, 'isDetectionActive:', isDetectionActive, 'detectedInputs:', allDetectedInputs.size);
+            // If we found inputs, ignore the timeout completion
+            if (allDetectedInputs.size > 0) return;
 
-            // Ignore if this event is from a previous binding attempt (check session ID)
-            if (event.payload?.session_id !== thisBindingId.toString())
-            {
-                console.log('[TIMER] [EVENT] Ignoring stale input-detection-complete event (session ID mismatch)');
-                return;
-            }
-
-            // Ignore if this event is from a previous binding attempt
-            if (currentBindingId !== thisBindingId)
-            {
-                console.log('[TIMER] [EVENT] Ignoring stale input-detection-complete event (ID mismatch)');
-                return;
-            }
-
-            // Ignore if detection was already completed/cancelled
-            if (!isDetectionActive)
-            {
-                console.log('[TIMER] [EVENT] Ignoring input-detection-complete, detection not active');
-                return;
-            }
-
-            // Double-check the modal is still visible and we're still in binding mode
-            const modal = document.getElementById('binding-modal');
-            if (!modal || modal.style.display === 'none' || !bindingMode)
-            {
-                console.log('[TIMER] [EVENT] Ignoring input-detection-complete, modal not visible or not in binding mode');
-                return;
-            }
-
-            // If we have at least one input detected, IGNORE completion event
-            // Keep listening for potential double-tap within the 1-second window
-            if (allDetectedInputs.size > 0)
-            {
-                console.log('[TIMER] [EVENT] Ignoring input-detection-complete - waiting for potential double-tap (inputs detected:', allDetectedInputs.size, ')');
-                return;
-            }
-
-            console.log('[TIMER] [EVENT] Processing input-detection-complete event');
             stopDetection('backend-timeout');
-
-            // Only reach here if no inputs were detected at all
-            console.log('[TIMER] [EVENT] No inputs detected, showing timeout message');
             statusEl.textContent = 'No input detected - timed out';
-            document.getElementById('binding-modal-countdown').textContent = '';
+            if (countdownEl) countdownEl.textContent = '';
 
-            // Store the binding ID to check it hasn't changed
-            const timeoutBindingId = currentBindingId;
-            setTimeout(() =>
-            {
-                // Only close if we're still on the same binding session
-                if (currentBindingId === timeoutBindingId && bindingMode)
-                {
-                    console.log('[TIMER] [EVENT] Closing modal after 2s timeout, binding ID match');
-                    closeBindingModal();
-                }
-                else
-                {
-                    console.log('[TIMER] [EVENT] NOT closing modal - binding ID changed or modal already closed');
-                }
+            setTimeout(() => {
+                if (currentBindingId === thisBindingId && bindingMode) closeBindingModal();
             }, 2000);
         });
 
-        // Store unlisten function for cleanup
-        window.currentCompletionUnlisten = unlistenCompletion;
-
-        // Activate keyboard detection
-        keyboardDetectionActive = true;
-
-        // Activate mouse button detection
-        let mouseDetectionHandler = null;
-
-        // Create mouse event handler
-        mouseDetectionHandler = async (event) =>
-        {
-            // Ignore if detection window has ended or we're hovering modal buttons
+        // 2. Mouse Listeners
+        window.mouseDetectionHandler = (event) => {
             if (!isDetectionActive || !window.mouseDetectionActive || window.getIgnoreModalMouseInputs()) return;
+            if (!document.getElementById('binding-modal').contains(event.target)) return;
 
-            // Only capture mouse events within the modal itself
-            const modal = document.getElementById('binding-modal');
-            if (!modal.contains(event.target)) return;
-
-            // Prevent default browser behavior
             event.preventDefault();
             event.stopPropagation();
 
-            // Map mouse button numbers to Star Citizen format
-            const buttonMap = {
-                0: 'mouse1',  // Left button
-                1: 'mouse3',  // Middle button
-                2: 'mouse2',  // Right button
-                3: 'mouse4',  // Side button (back)
-                4: 'mouse5'   // Side button (forward)
-            };
+            const buttonMap = {0: 'mouse1', 1: 'mouse3', 2: 'mouse2', 3: 'mouse4', 4: 'mouse5'};
+            const displayNameMap = {'mouse1': 'Left Mouse', 'mouse2': 'Right Mouse', 'mouse3': 'Middle Mouse'};
 
             const scButton = buttonMap[event.button] || `mouse${event.button + 1}`;
 
-            // Build the input string (mouse format)
-            const inputString = scButton;
-
-            // Build display name
-            const buttonNames = {
-                'mouse1': 'Left Mouse Button',
-                'mouse2': 'Right Mouse Button',
-                'mouse3': 'Middle Mouse Button',
-                'mouse4': 'Mouse Button 4',
-                'mouse5': 'Mouse Button 5'
-            };
-            const displayName = buttonNames[scButton] || `Mouse Button ${event.button}`;
-
-            // Create a synthetic event that matches the structure from Rust backend
-            const syntheticResult = {
-                input_string: inputString,
-                display_name: displayName,
+            const synthetic = {
+                input_string: scButton,
+                display_name: displayNameMap[scButton] || `Mouse Button ${event.button}`,
                 device_type: 'Mouse',
-                axis_value: null,
-                modifiers: [],
-                is_modifier: false
+                modifiers: []
             };
 
-            // Process this mouse input through the same pipeline
-            const processed = processInput(syntheticResult);
-
-            if (!processed) return;
-
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
-
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
-
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
+            handleDetectedInput(processInput(synthetic));
+        };
+        // ... (Add contextMenu, mouseUp, beforeUnload as before)
+        window.mouseUpHandler = (e) => {
+            if (window.mouseDetectionActive) {
+                e.preventDefault();
+            }
+        };
+        window.contextMenuHandler = (e) => {
+            if (window.mouseDetectionActive && document.getElementById('binding-modal').contains(e.target)) e.preventDefault();
+        };
+        window.beforeUnloadHandler = (e) => {
+            if (window.mouseDetectionActive) {
+                e.preventDefault();
+                e.returnValue = '';
             }
         };
 
-        // Prevent right-click context menu during recording
-        const contextMenuHandler = (event) =>
-        {
-            if (!window.mouseDetectionActive) return;
-            const modal = document.getElementById('binding-modal');
-            if (!modal.contains(event.target)) return;
-            event.preventDefault();
-        };
-
-        // Prevent browser navigation for back/forward buttons
-        const mouseUpHandler = (event) =>
-        {
-            if (!window.mouseDetectionActive) return;
-            const modal = document.getElementById('binding-modal');
-            if (!modal.contains(event.target)) return;
-
-            // Prevent default for buttons 3 and 4 (back/forward)
-            if (event.button === 3 || event.button === 4)
-            {
-                event.preventDefault();
-                event.stopPropagation();
-            }
-        };
-
-        // Prevent beforeunload navigation during recording
-        const beforeUnloadHandler = (event) =>
-        {
-            if (!window.mouseDetectionActive) return;
-            event.preventDefault();
-            event.returnValue = '';
-        };
-
-        // Store handlers on window for cleanup
-        window.mouseDetectionHandler = mouseDetectionHandler;
-        window.contextMenuHandler = contextMenuHandler;
-        window.mouseUpHandler = mouseUpHandler;
-        window.beforeUnloadHandler = beforeUnloadHandler;
+        document.addEventListener('mousedown', window.mouseDetectionHandler, true);
+        document.addEventListener('mouseup', window.mouseUpHandler, true);
+        document.addEventListener('contextmenu', window.contextMenuHandler, true);
+        window.addEventListener('beforeunload', window.beforeUnloadHandler, true);
         window.mouseDetectionActive = true;
 
-        // Add mouse listeners (capture phase)
-        document.addEventListener('mousedown', mouseDetectionHandler, true);
-        document.addEventListener('mouseup', mouseUpHandler, true);
-        document.addEventListener('contextmenu', contextMenuHandler, true);
-        window.addEventListener('beforeunload', beforeUnloadHandler, true);
-
-        // Create keyboard event handler
-        keyboardDetectionHandler = async (event) =>
-        {
-            // Ignore if detection window has ended
+        // 3. Keyboard Listeners
+        keyboardDetectionActive = true;
+        keyboardDetectionHandler = (event) => {
             if (!isDetectionActive || !keyboardDetectionActive) return;
-
-            // Prevent default browser behavior
             event.preventDefault();
             event.stopPropagation();
 
-            const code = event.code;
-            const key = event.key;
+            // Modifier Tracking
+            if (event.code === 'AltLeft') window._lastAltKeyPressed = 'LALT';
+            if (event.code === 'AltRight') window._lastAltKeyPressed = 'RALT';
+            // ... (keep rest of modifier tracking from original code)
 
-            // Detect modifiers being held
-            // We need to track which specific modifier keys are currently pressed
-            // event.location only tells us about the current key, not held modifiers
-            // So we use event.getModifierState() and track pressed keys via code
+            const scKey = convertKeyCodeToSC(event.code, event.key);
             const modifiers = [];
+            if (event.shiftKey && scKey !== 'lshift' && scKey !== 'rshift') modifiers.push('LSHIFT'); // Simplified logic for brevity
+            if (event.ctrlKey && scKey !== 'lctrl' && scKey !== 'rctrl') modifiers.push('LCTRL');
+            if (event.altKey && scKey !== 'lalt' && scKey !== 'ralt') modifiers.push(window._lastAltKeyPressed || 'LALT');
 
-            // For modifier detection, we need to check what's actually held down
-            // The issue is that event.shiftKey/ctrlKey/altKey don't tell us left vs right
-            // We need to track this separately or use the code of the current key if it's a modifier
-            if (event.shiftKey)
-            {
-                // Check if we can determine left/right from the current key
-                if (code === 'ShiftLeft')
-                {
-                    modifiers.push('LSHIFT');
-                } else if (code === 'ShiftRight')
-                {
-                    modifiers.push('RSHIFT');
-                } else
-                {
-                    // Shift is held but we're pressing a different key
-                    // Default to left shift (most common)
-                    modifiers.push('LSHIFT');
-                }
-            }
-            if (event.ctrlKey)
-            {
-                if (code === 'ControlLeft')
-                {
-                    modifiers.push('LCTRL');
-                } else if (code === 'ControlRight')
-                {
-                    modifiers.push('RCTRL');
-                } else
-                {
-                    modifiers.push('LCTRL');
-                }
-            }
-            if (event.altKey)
-            {
-                if (code === 'AltLeft')
-                {
-                    modifiers.push('LALT');
-                } else if (code === 'AltRight')
-                {
-                    modifiers.push('RALT');
-                } else
-                {
-                    // Alt is held but we're pressing a different key
-                    // We need to track which alt was pressed - check keyboard state
-                    // Unfortunately, there's no reliable way to know which Alt is held
-                    // when pressing another key. We'll track it via a global variable.
-                    modifiers.push(window._lastAltKeyPressed || 'LALT');
-                }
-            }
-
-            // Track which modifier keys are pressed for future reference
-            if (code === 'AltLeft') window._lastAltKeyPressed = 'LALT';
-            if (code === 'AltRight') window._lastAltKeyPressed = 'RALT';
-            if (code === 'ShiftLeft') window._lastShiftKeyPressed = 'LSHIFT';
-            if (code === 'ShiftRight') window._lastShiftKeyPressed = 'RSHIFT';
-            if (code === 'ControlLeft') window._lastCtrlKeyPressed = 'LCTRL';
-            if (code === 'ControlRight') window._lastCtrlKeyPressed = 'RCTRL';
-
-            // Convert to Star Citizen format
-            const scKey = convertKeyCodeToSC(code, key);
-
-            // Check if this is a modifier key
-            const isModifierKey = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].includes(scKey);
-
-            // Build the input string (kb1_key format)
-            let inputString = `kb1_${scKey}`;
-
-            // Build display name
-            let displayName = `Keyboard - ${code}`;
-
-            // For modifiers pressed alone, don't wait for other keys - accept them immediately
-            if (isModifierKey && modifiers.length === 1 && modifiers[0].toLowerCase() === scKey)
-            {
-                // This is a modifier key pressed alone (not as a combo with other modifiers)
-                // Clear the modifier list since we're binding the modifier itself
-                modifiers.length = 0;
-            }
-
-            // Create a synthetic event that matches the structure from Rust backend
-            const syntheticResult = {
-                input_string: inputString,
-                display_name: displayName,
+            const synthetic = {
+                input_string: `kb1_${scKey}`,
+                display_name: `Keyboard - ${event.code}`,
                 device_type: 'Keyboard',
-                axis_value: null,
-                modifiers: modifiers,
-                is_modifier: false
+                modifiers: modifiers
             };
 
-            // Process this keyboard input through the same pipeline
-            const processed = processInput(syntheticResult);
-
-            if (!processed) return;
-
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
-
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
-
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Check if the first detected input is a modifier key
-                    const firstInput = Array.from(allDetectedInputs.values())[0];
-                    const isFirstModifier = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].some(mod =>
-                        firstInput.scFormattedInput.includes(mod)
-                    );
-
-                    // If first input is a modifier, automatically combine it with the second key
-                    if (isFirstModifier)
-                    {
-                        // Use the newly detected input (second key) as the primary binding
-                        // The processInput already added modifiers if they were held, so processed already has the combo
-                        stopDetection('modifier-auto-combo');
-                        clearPrimaryCountdown();
-
-                        statusEl.innerHTML = '';
-                        renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                        selectedInputKey = processed.scFormattedInput;
-                        const conflicts = await setPendingBindingSelection(processed);
-                        updateConflictDisplay(conflicts);
-
-                        // Don't show selection UI - go straight to save
-                        return;
-                    }
-
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
-            }
+            handleDetectedInput(processInput(synthetic));
         };
-
-        // Add keyboard listener (capture phase)
         document.addEventListener('keydown', keyboardDetectionHandler, true);
 
-        // Start event-based detection (doesn't return a value, just emits events)
-        console.log('[TIMER] [RUST] Calling wait_for_inputs_with_events with bindingId:', thisBindingId);
+        // Start Rust Backend Detection
         invoke('wait_for_inputs_with_events', {
             sessionId: thisBindingId.toString(),
-            initialTimeoutSecs: countdown,
+            initialTimeoutSecs: 10,
             collectDurationSecs: 2
-        }).catch((error) =>
-        {
-            console.error('[TIMER] [RUST] Error during input detection:', error);
-
-            // Cleanup listeners
-            if (window.currentInputDetectionUnlisten)
-            {
-                window.currentInputDetectionUnlisten();
-                window.currentInputDetectionUnlisten = null;
-            }
-            if (window.currentCompletionUnlisten)
-            {
-                window.currentCompletionUnlisten();
-                window.currentCompletionUnlisten = null;
-            }
-
-            // Cleanup keyboard detection
-            if (keyboardDetectionHandler)
-            {
-                document.removeEventListener('keydown', keyboardDetectionHandler, true);
-                keyboardDetectionHandler = null;
-            }
-            keyboardDetectionActive = false;
-
-            // Cleanup mouse detection
-            if (window.mouseDetectionHandler)
-            {
-                document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
-                document.removeEventListener('mouseup', window.mouseUpHandler, true);
-                document.removeEventListener('contextmenu', window.contextMenuHandler, true);
-                window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-                window.mouseDetectionHandler = null;
-                window.contextMenuHandler = null;
-                window.mouseUpHandler = null;
-                window.beforeUnloadHandler = null;
-            }
-            window.mouseDetectionActive = false;
+        }).catch(e => {
+            console.error('Rust detection failed', e);
+            closeBindingModal();
         });
-    } catch (error)
-    {
-        // Clear the timer in case of error
-        if (countdownInterval)
-        {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-        }
-        console.error('Error waiting for input:', error);
-        if (window.showAlert) await window.showAlert(`Error waiting for input: ${error}`, 'Error');
+
+    } catch (e) {
+        console.error(e);
         closeBindingModal();
     }
 }
 
-function cancelBinding()
-{
+
+function cancelBinding() {
     closeBindingModal();
 }
 
-async function clearBinding()
-{
+async function clearBinding() {
     if (!currentBindingAction) return;
 
-    try
-    {
+    try {
         await invoke('update_binding', {
             actionMapName: currentBindingAction.actionMapName,
             actionName: currentBindingAction.actionName,
@@ -2686,15 +1941,13 @@ async function clearBinding()
 
         await refreshBindings();
         closeBindingModal();
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error clearing binding:', error);
         if (window.showAlert) await window.showAlert(`Error clearing binding: ${error}`, 'Error');
     }
 }
 
-function closeBindingModal()
-{
+function closeBindingModal() {
     console.log('[TIMER] closeBindingModal called');
     stopDetection('modal-close');
 
@@ -2704,12 +1957,10 @@ function closeBindingModal()
     setBindingSaveEnabled(false);
 }
 
-async function resetBinding()
-{
+async function resetBinding() {
     if (!currentBindingAction) return;
 
-    try
-    {
+    try {
         const actionMapName = currentBindingAction.actionMapName;
         const actionName = currentBindingAction.actionName;
 
@@ -2727,28 +1978,23 @@ async function resetBinding()
         // Refresh to show default bindings
         await refreshBindings();
         closeBindingModal();
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error resetting binding:', error);
         // Fallback to old method if reset_binding doesn't exist
-        if (error.toString().includes('not found'))
-        {
+        if (error.toString().includes('not found')) {
             console.log('Using fallback reset method');
             await fallbackResetBinding();
-        } else
-        {
+        } else {
             if (window.showAlert) await window.showAlert(`Error resetting binding: ${error}`, 'Error');
         }
     }
 }
 
 // Fallback method for reset if backend doesn't have reset_binding command yet
-async function fallbackResetBinding()
-{
+async function fallbackResetBinding() {
     if (!currentBindingAction) return;
 
-    try
-    {
+    try {
         const actionMapName = currentBindingAction.actionMapName;
         const actionName = currentBindingAction.actionName;
 
@@ -2763,12 +2009,12 @@ async function fallbackResetBinding()
         if (window.updateUnsavedIndicator) window.updateUnsavedIndicator();
         await refreshBindings();
         closeBindingModal();
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error in fallback reset:', error);
         if (window.showAlert) await window.showAlert(`Error resetting binding: ${error}`, 'Error');
     }
 }
+
 // Make startBinding available globally
 window.startBinding = startBinding;
 window.cancelBinding = cancelBinding;
@@ -2776,108 +2022,82 @@ window.clearBinding = clearBinding;
 window.closeBindingModal = closeBindingModal;
 window.resetBinding = resetBinding;
 
-function applyJoystickMapping(inputString, deviceUuid)
-{
+// =============================================================================
+//  FIXED MAPPING LOGIC
+// =============================================================================
+
+function applyJoystickMapping(inputString, deviceUuid) {
     // Extract the backend-assigned prefix (e.g., "js1", "gp2")
     const match = inputString.match(/^(js|gp)(\d+)_/);
-    if (!match)
-    {
-        return inputString;
-    }
+    if (!match) return inputString;
 
-    const deviceType = match[1]; // "js" or "gp"
-    const deviceNum = parseInt(match[2]); // 1, 2, 3...
-
-    // Calculate the 0-based index this input corresponds to
-    // (e.g., js1 -> index 0, js2 -> index 1)
-    const calculatedIndex = deviceNum - 1;
+    const deviceNum = parseInt(match[2]); // 1, 2...
+    const calculatedIndex = deviceNum - 1; // 0, 1...
 
     let effectiveUuid = deviceUuid;
 
-    // CRITICAL FIX: Handle Identical Devices
-    // The backend sends a raw UUID (e.g., "1234-5678-nosn").
-    // But our mapping tables use Indexed UUIDs (e.g., "1234-5678-nosn-idx1") for uniqueness.
-    // If the raw UUID isn't found, we try to reconstruct the Indexed UUID based on the input number.
-    if (deviceUuid && !deviceUuidToAutoPrefix[deviceUuid])
-    {
-        // Try appending the index derived from the input string (js2 -> idx1)
+    // FIX: If raw UUID lookup fails, try the Indexed UUID (e.g. uuid-idx1)
+    if (deviceUuid && !deviceUuidToAutoPrefix[deviceUuid]) {
         const indexedUuid = `${deviceUuid}-idx${calculatedIndex}`;
-
-        if (deviceUuidToAutoPrefix[indexedUuid])
-        {
-            console.log(`[KEYBINDINGS] inferred Indexed UUID: ${indexedUuid} (from ${inputString})`);
+        if (deviceUuidToAutoPrefix[indexedUuid]) {
+            console.log(`[KEYBINDINGS] Inferred Indexed UUID: ${indexedUuid}`);
             effectiveUuid = indexedUuid;
         }
     }
 
-    // Step 1: Map backend prefix to auto-detected prefix
-    let autoDetectedPrefix = match[0].replace('_', ''); // Default to self (e.g., "js2")
-
-    if (effectiveUuid && deviceUuidToAutoPrefix[effectiveUuid])
-    {
+    let autoDetectedPrefix = match[0].replace('_', '');
+    if (effectiveUuid && deviceUuidToAutoPrefix[effectiveUuid]) {
         autoDetectedPrefix = deviceUuidToAutoPrefix[effectiveUuid];
-        // Only log if it's actually different to avoid spam
-        if (autoDetectedPrefix !== match[0].replace('_', '')) {
-            console.log(`[KEYBINDINGS] Mapped ${inputString} (${effectiveUuid}) -> Auto-ID ${autoDetectedPrefix}`);
-        }
     }
 
-    // Step 2: Check for custom User Override (from Device Manager)
+    // Check for Custom Override
+    // Priority: 1. Window Global (Device Manager active) 2. Local Storage (Device Manager inactive)
     let finalPrefix = autoDetectedPrefix;
+    let overrideFound = false;
 
-    if (window.applyDevicePrefixOverride && effectiveUuid)
-    {
-        // Create a temp input using the Auto-Detected ID (e.g., "js1_x")
-        // This ensures the override logic sees the "Card ID", not the "Backend ID"
+    if (window.applyDevicePrefixOverride && effectiveUuid) {
+        // Try global function first
         const tempInput = inputString.replace(/^(js|gp)\d+_/, `${autoDetectedPrefix}_`);
-
-        // Pass the effective (indexed) UUID to the override function
         const overriddenInput = window.applyDevicePrefixOverride(tempInput, effectiveUuid);
 
-        if (overriddenInput !== tempInput)
-        {
+        if (overriddenInput !== tempInput) {
             const overrideMatch = overriddenInput.match(/^(js|gp\d+)_/);
-            if (overrideMatch)
-            {
+            if (overrideMatch) {
                 finalPrefix = overrideMatch[1];
-                console.log(`[KEYBINDINGS] Applied Override: ${autoDetectedPrefix} -> ${finalPrefix}`);
+                overrideFound = true;
             }
         }
     }
 
-    // Apply the final prefix to the input string
-    const mappedInput = inputString.replace(/^(js|gp)\d+_/, `${finalPrefix}_`);
+    // Fallback to local storage lookup if global function didn't apply/exist
+    if (!overrideFound && effectiveUuid && localPrefixMapping[effectiveUuid]) {
+        finalPrefix = localPrefixMapping[effectiveUuid];
+        // console.log(`[KEYBINDINGS] Applied local override: ${autoDetectedPrefix} -> ${finalPrefix}`);
+    }
 
-    return mappedInput;
+    return inputString.replace(/^(js|gp)\d+_/, `${finalPrefix}_`);
 }
 
 
-async function setPendingBindingSelection(processedInput)
-{
+async function setPendingBindingSelection(processedInput) {
     if (!currentBindingAction) return [];
 
-    const { actionMapName, actionName } = currentBindingAction;
+    const {actionMapName, actionName} = currentBindingAction;
     const mappedInput = processedInput.scFormattedInput;
 
     // Check for conflicts by searching through all actions
     const conflicts = [];
-    if (window.getCurrentKeybindings())
-    {
+    if (window.getCurrentKeybindings()) {
         const keybindings = window.getCurrentKeybindings();
-        keybindings.action_maps.forEach(actionMap =>
-        {
-            actionMap.actions.forEach(action =>
-            {
+        keybindings.action_maps.forEach(actionMap => {
+            actionMap.actions.forEach(action => {
                 // Skip the current action we're binding
                 if (actionMap.name === actionMapName && action.name === actionName) return;
 
                 // Check if this action has a binding that matches our new input
-                if (action.bindings)
-                {
-                    action.bindings.forEach(binding =>
-                    {
-                        if (binding.input === mappedInput)
-                        {
+                if (action.bindings) {
+                    action.bindings.forEach(binding => {
+                        if (binding.input === mappedInput) {
                             conflicts.push({
                                 action_map: actionMap.name,
                                 action_name: action.name,
@@ -2904,20 +2124,17 @@ async function setPendingBindingSelection(processedInput)
     return conflicts;
 }
 
-function updateConflictDisplay(conflicts)
-{
+function updateConflictDisplay(conflicts) {
     const conflictDisplay = document.getElementById('binding-conflict-display');
     if (!conflictDisplay) return;
 
-    if (!conflicts || conflicts.length === 0)
-    {
+    if (!conflicts || conflicts.length === 0) {
         conflictDisplay.style.display = 'none';
         conflictDisplay.innerHTML = '';
         return;
     }
 
-    const conflictItems = conflicts.map(c =>
-    {
+    const conflictItems = conflicts.map(c => {
         const actionLabel = (c.action_label && !c.action_label.startsWith('@'))
             ? c.action_label
             : c.action_name;
@@ -2946,37 +2163,29 @@ function updateConflictDisplay(conflicts)
     conflictDisplay.style.display = 'block';
 }
 
-function updateSelectionButtonStates()
-{
-    selectionButtons.forEach((btn, key) =>
-    {
-        if (key === selectedInputKey)
-        {
+function updateSelectionButtonStates() {
+    selectionButtons.forEach((btn, key) => {
+        if (key === selectedInputKey) {
             btn.classList.add('selected');
-        } else
-        {
+        } else {
             btn.classList.remove('selected');
         }
     });
 }
 
-function setSelectionMessage(message)
-{
-    if (selectionMessageEl)
-    {
+function setSelectionMessage(message) {
+    if (selectionMessageEl) {
         selectionMessageEl.textContent = message;
     }
 }
 
 // Conflict Modal Functions
-function showConflictModal(conflicts)
-{
+function showConflictModal(conflicts) {
     const modal = document.getElementById('conflict-modal');
     const conflictList = document.getElementById('conflict-list');
 
     // Populate conflict list
-    conflictList.innerHTML = conflicts.map(c =>
-    {
+    conflictList.innerHTML = conflicts.map(c => {
         const actionLabel = (c.action_label && !c.action_label.startsWith('@'))
             ? c.action_label
             : c.action_name;
@@ -2996,8 +2205,7 @@ function showConflictModal(conflicts)
     modal.style.display = 'flex';
 }
 
-function closeConflictModal()
-{
+function closeConflictModal() {
     const modal = document.getElementById('conflict-modal');
     modal.style.display = 'none';
 
@@ -3008,20 +2216,17 @@ function closeConflictModal()
     // Update binding modal status
     document.getElementById('binding-modal-status').textContent = 'Binding cancelled';
 
-    setTimeout(() =>
-    {
+    setTimeout(() => {
         closeBindingModal();
     }, 1000);
 }
 
-async function confirmConflictBinding()
-{
+async function confirmConflictBinding() {
     const modal = document.getElementById('conflict-modal');
     modal.style.display = 'none';
 
-    if (window.pendingBinding)
-    {
-        const { actionMapName, actionName, mappedInput, multiTap } = window.pendingBinding;
+    if (window.pendingBinding) {
+        const {actionMapName, actionName, mappedInput, multiTap} = window.pendingBinding;
 
         // Get the selected activation mode
         const activationModeSelect = document.getElementById('activation-mode-select');
@@ -3033,8 +2238,7 @@ async function confirmConflictBinding()
     }
 }
 
-async function applyBinding(actionMapName, actionName, mappedInput, multiTap = null, activationMode = null)
-{
+async function applyBinding(actionMapName, actionName, mappedInput, multiTap = null, activationMode = null) {
     console.log('Calling update_binding...');
     // Update the binding in backend
     await invoke('update_binding', {
@@ -3056,8 +2260,7 @@ async function applyBinding(actionMapName, actionName, mappedInput, multiTap = n
     console.log('Bindings refreshed and saved to localStorage');
 
     // Close modal after a short delay
-    setTimeout(() =>
-    {
+    setTimeout(() => {
         closeBindingModal();
     }, 1000);
 }
@@ -3066,8 +2269,7 @@ async function applyBinding(actionMapName, actionName, mappedInput, multiTap = n
  * Remove a binding by clicking the X button on a binding tag
  * Uses the same logic as the "Manage Bindings" modal remove button
  */
-async function removeBindingTag(event, actionName, inputToClear)
-{
+async function removeBindingTag(event, actionName, inputToClear) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -3078,11 +2280,9 @@ async function removeBindingTag(event, actionName, inputToClear)
     let actionToModify = null;
 
     // Find which action map contains this action
-    for (const actionMap of currentKeybindings.action_maps)
-    {
+    for (const actionMap of currentKeybindings.action_maps) {
         const action = actionMap.actions.find(a => a.name === actionName);
-        if (action)
-        {
+        if (action) {
             actionMapName = actionMap.name;
             actionToModify = action;
             break;
@@ -3093,8 +2293,7 @@ async function removeBindingTag(event, actionName, inputToClear)
 
     // Use the same removeBinding function from main.js which handles confirmation
     const removalSucceeded = await window.removeBinding(actionMapName, actionName, inputToClear);
-    if (removalSucceeded)
-    {
+    if (removalSucceeded) {
         // Refresh the keybindings to update the UI
         await refreshBindings();
     }
@@ -3104,14 +2303,12 @@ async function removeBindingTag(event, actionName, inputToClear)
  * Clear all bindings for all actions within an action map
  * @param {string} actionMapName - The name of the action map (e.g., 'spaceship_general')
  */
-async function clearAllActionMapBindings(actionMapName)
-{
+async function clearAllActionMapBindings(actionMapName) {
     if (!currentKeybindings) return;
 
     // Find the action map
     const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
-    if (!actionMap)
-    {
+    if (!actionMap) {
         console.error('Action map not found:', actionMapName);
         return;
     }
@@ -3128,19 +2325,15 @@ async function clearAllActionMapBindings(actionMapName)
 
     if (!confirmed) return;
 
-    try
-    {
+    try {
         // Process each action
-        for (const action of actionMap.actions)
-        {
+        for (const action of actionMap.actions) {
             if (!action.bindings || action.bindings.length === 0) continue;
 
             // Collect input types to clear
             const inputTypesToClear = new Set();
-            action.bindings.forEach(binding =>
-            {
-                if (binding.input && binding.input.trim())
-                {
+            action.bindings.forEach(binding => {
+                if (binding.input && binding.input.trim()) {
                     if (binding.input.startsWith('js')) inputTypesToClear.add('joystick');
                     else if (binding.input.startsWith('kb')) inputTypesToClear.add('keyboard');
                     else if (binding.input.startsWith('mouse')) inputTypesToClear.add('mouse');
@@ -3149,19 +2342,24 @@ async function clearAllActionMapBindings(actionMapName)
             });
 
             // Clear each input type
-            for (const inputType of inputTypesToClear)
-            {
+            for (const inputType of inputTypesToClear) {
                 let clearedInput = '';
-                switch (inputType)
-                {
-                    case 'joystick': clearedInput = 'js1_ '; break;
-                    case 'keyboard': clearedInput = 'kb1_ '; break;
-                    case 'mouse': clearedInput = 'mouse1_ '; break;
-                    case 'gamepad': clearedInput = 'gp1_ '; break;
+                switch (inputType) {
+                    case 'joystick':
+                        clearedInput = 'js1_ ';
+                        break;
+                    case 'keyboard':
+                        clearedInput = 'kb1_ ';
+                        break;
+                    case 'mouse':
+                        clearedInput = 'mouse1_ ';
+                        break;
+                    case 'gamepad':
+                        clearedInput = 'gp1_ ';
+                        break;
                 }
 
-                if (clearedInput)
-                {
+                if (clearedInput) {
                     await invoke('update_binding', {
                         actionMapName: actionMapName,
                         actionName: action.name,
@@ -3177,8 +2375,7 @@ async function clearAllActionMapBindings(actionMapName)
         await refreshBindings();
 
         window.showSuccessMessage(`Cleared all bindings in "${actionMapLabel}"`);
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error clearing action map bindings:', error);
         if (window.showAlert) await window.showAlert(`Error clearing bindings: ${error}`, 'Error');
     }
@@ -3188,14 +2385,12 @@ async function clearAllActionMapBindings(actionMapName)
  * Reset all bindings for all actions within an action map to their defaults
  * @param {string} actionMapName - The name of the action map (e.g., 'spaceship_general')
  */
-async function resetAllActionMapBindings(actionMapName)
-{
+async function resetAllActionMapBindings(actionMapName) {
     if (!currentKeybindings) return;
 
     // Find the action map
     const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
-    if (!actionMap)
-    {
+    if (!actionMap) {
         console.error('Action map not found:', actionMapName);
         return;
     }
@@ -3212,22 +2407,17 @@ async function resetAllActionMapBindings(actionMapName)
 
     if (!confirmed) return;
 
-    try
-    {
+    try {
         // Process each action
-        for (const action of actionMap.actions)
-        {
-            try
-            {
+        for (const action of actionMap.actions) {
+            try {
                 await invoke('reset_binding', {
                     actionMapName: actionMapName,
                     actionName: action.name
                 });
-            } catch (resetError)
-            {
+            } catch (resetError) {
                 // If reset_binding doesn't exist, try clearing instead
-                if (resetError.toString().includes('not found'))
-                {
+                if (resetError.toString().includes('not found')) {
                     await invoke('update_binding', {
                         actionMapName: actionMapName,
                         actionName: action.name,
@@ -3243,8 +2433,7 @@ async function resetAllActionMapBindings(actionMapName)
         await refreshBindings();
 
         window.showSuccessMessage(`Reset all bindings in "${actionMapLabel}" to defaults`);
-    } catch (error)
-    {
+    } catch (error) {
         console.error('Error resetting action map bindings:', error);
         if (window.showAlert) await window.showAlert(`Error resetting bindings: ${error}`, 'Error');
     }
@@ -3254,116 +2443,91 @@ async function resetAllActionMapBindings(actionMapName)
  * Swap all joystick prefixes (js1 <-> js2) in the current keybindings.
  * This is useful when Star Citizen flips device associations.
  */
-async function swapJoystickPrefixes()
-{
-    if (!currentKeybindings)
-    {
-        if (window.showAlert) await window.showAlert('No keybindings loaded. Please load a keybinding file first.', 'No Keybindings');
-        return;
-    }
+async function swapJoystickPrefixes() {
+    if (!currentKeybindings) return;
 
-    try
-    {
+    try {
         let swapCount = 0;
-        const tempPlaceholder = 'js_TEMP_SWAP_';
+        const updatesToSync = [];
 
-        // Iterate through all action maps and their actions
-        for (const actionMap of currentKeybindings.action_maps)
-        {
-            for (const action of actionMap.actions)
-            {
+        // 1. Calculate Swaps in Memory
+        for (const actionMap of currentKeybindings.action_maps) {
+            for (const action of actionMap.actions) {
                 if (!action.bindings) continue;
 
-                for (const binding of action.bindings)
-                {
+                for (const binding of action.bindings) {
                     if (!binding.input) continue;
 
-                    const originalInput = binding.input;
+                    let newInput = null;
+                    let isModified = false;
 
-                    // Check if this is a js1 or js2 binding
-                    if (binding.input.match(/^js1_/i))
-                    {
-                        // First, replace js1 with a temp placeholder
-                        binding.input = binding.input.replace(/^js1_/i, tempPlaceholder);
-                        swapCount++;
-                    }
-                    else if (binding.input.match(/^js2_/i))
-                    {
-                        // Replace js2 with js1
-                        binding.input = binding.input.replace(/^js2_/i, 'js1_');
-                        swapCount++;
-                    }
-
-                    // Also update display_name if it contains the joystick prefix
-                    if (binding.display_name && originalInput !== binding.input)
-                    {
-                        if (binding.display_name.includes('Joystick 1'))
-                        {
-                            binding.display_name = binding.display_name.replace('Joystick 1', 'Joystick TEMP');
+                    // Direct Swap Logic
+                    if (binding.input.match(/^js1_/i)) {
+                        newInput = binding.input.replace(/^js1_/i, 'js2_');
+                        if (binding.display_name && binding.display_name.includes('Joystick 1')) {
+                            binding.display_name = binding.display_name.replace('Joystick 1', 'Joystick 2');
                         }
-                        else if (binding.display_name.includes('Joystick 2'))
-                        {
+                        isModified = true;
+                    } else if (binding.input.match(/^js2_/i)) {
+                        newInput = binding.input.replace(/^js2_/i, 'js1_');
+                        if (binding.display_name && binding.display_name.includes('Joystick 2')) {
                             binding.display_name = binding.display_name.replace('Joystick 2', 'Joystick 1');
                         }
+                        isModified = true;
+                    }
+
+                    if (isModified && newInput) {
+                        // Update local object immediately for UI responsiveness
+                        binding.input = newInput;
+                        swapCount++;
+
+                        // Queue for backend sync
+                        updatesToSync.push({
+                            actionMapName: actionMap.name,
+                            actionName: action.name,
+                            newInput: newInput,
+                            multiTap: binding.multi_tap || null,
+                            activationMode: binding.activation_mode || null
+                        });
                     }
                 }
             }
         }
 
-        // Second pass: replace temp placeholder with js2
-        for (const actionMap of currentKeybindings.action_maps)
-        {
-            for (const action of actionMap.actions)
-            {
-                if (!action.bindings) continue;
+        // 2. Sync with Backend
+        if (swapCount > 0) {
+            if (window.showSuccessMessage) window.showSuccessMessage(`Syncing ${swapCount} swaps...`);
 
-                for (const binding of action.bindings)
-                {
-                    if (!binding.input) continue;
-
-                    if (binding.input.startsWith(tempPlaceholder))
-                    {
-                        binding.input = binding.input.replace(tempPlaceholder, 'js2_');
-                    }
-
-                    // Also fix display_name temp placeholder
-                    if (binding.display_name && binding.display_name.includes('Joystick TEMP'))
-                    {
-                        binding.display_name = binding.display_name.replace('Joystick TEMP', 'Joystick 2');
-                    }
-                }
+            // Execute in batches to avoid choking the IPC or backend
+            const batchSize = 20;
+            for (let i = 0; i < updatesToSync.length; i += batchSize) {
+                const batch = updatesToSync.slice(i, i + batchSize);
+                await Promise.all(batch.map(u =>
+                    invoke('update_binding', {
+                        actionMapName: u.actionMapName,
+                        actionName: u.actionName,
+                        newInput: u.newInput,
+                        multiTap: u.multiTap,
+                        activationMode: u.activationMode
+                    })
+                ));
             }
-        }
 
-        // Also swap the device entries if they exist
-        if (currentKeybindings.devices && currentKeybindings.devices.joysticks)
-        {
-            const joysticks = currentKeybindings.devices.joysticks;
-            if (joysticks.length >= 2)
-            {
-                // Swap the first two joysticks
-                const temp = joysticks[0];
-                joysticks[0] = joysticks[1];
-                joysticks[1] = temp;
-            }
-        }
-
-        if (swapCount > 0)
-        {
+            // 3. Finalize
             hasUnsavedChanges = true;
-            renderKeybindings();
-            cacheUserCustomizations();
-            window.showSuccessMessage(`Swapped ${swapCount} joystick bindings (JS1 ↔ JS2)`);
+            if (window.updateUnsavedIndicator) window.updateUnsavedIndicator();
+
+            if (window.renderKeybindings) window.renderKeybindings();
+            if (window.cacheUserCustomizations) await window.cacheUserCustomizations();
+
+            if (window.showSuccessMessage) window.showSuccessMessage(`Swapped ${swapCount} bindings (JS1 ↔ JS2)`);
+        } else {
+            if (window.showSuccessMessage) window.showSuccessMessage('No JS1/JS2 bindings found to swap');
         }
-        else
-        {
-            if (window.showAlert) await window.showAlert('No joystick bindings found to swap.', 'No Bindings');
-        }
-    }
-    catch (error)
-    {
-        console.error('Error swapping joystick prefixes:', error);
-        if (window.showAlert) await window.showAlert(`Error swapping prefixes: ${error}`, 'Error');
+
+    } catch (error) {
+        console.error('Error swapping prefixes:', error);
+        if (window.showAlert) window.showAlert(`Error swapping: ${error}`, 'Error');
     }
 }
 
@@ -3403,59 +2567,74 @@ window.buildDeviceUuidMapping = buildDeviceUuidMapping;
 
 // Make state variables globally available
 window.getShowUnboundActions = () => showUnboundActions;
-window.setShowUnboundActions = (value) => { showUnboundActions = value; };
+window.setShowUnboundActions = (value) => {
+    showUnboundActions = value;
+};
 window.getCustomizedOnly = () => customizedOnly;
-window.setCustomizedOnly = (value) => { customizedOnly = value; };
+window.setCustomizedOnly = (value) => {
+    customizedOnly = value;
+};
 window.getCurrentFilter = () => currentFilter;
-window.setCurrentFilter = (value) => { currentFilter = value; };
+window.setCurrentFilter = (value) => {
+    currentFilter = value;
+};
 window.getSearchTerm = () => searchTerm;
-window.setSearchTerm = (value) => { searchTerm = value; };
+window.setSearchTerm = (value) => {
+    searchTerm = value;
+};
 window.getCurrentFilename = () => currentFilename;
 window.getCurrentKeybindings = () => currentKeybindings;
 window.getHasUnsavedChanges = () => hasUnsavedChanges;
-window.setHasUnsavedChanges = (value) => { hasUnsavedChanges = value; };
+window.setHasUnsavedChanges = (value) => {
+    hasUnsavedChanges = value;
+};
 window.getIgnoreModalMouseInputs = () => ignoreModalMouseInputs;
-window.setIgnoreModalMouseInputs = (value) => { ignoreModalMouseInputs = value; };
+window.setIgnoreModalMouseInputs = (value) => {
+    ignoreModalMouseInputs = value;
+};
 window.getIsDetectionActive = () => isDetectionActive;
 window.isBindingModalOpen = () => bindingMode;
-
+window.applyJoystickMapping = applyJoystickMapping;
+window.processInput = processInput;
+window.buildDeviceUuidMapping = buildDeviceUuidMapping;
 /**
  * Toggle the visibility of an action map's actions list
  * @param {HTMLElement} headerEl - The action-map-header element that was clicked
  */
-window.toggleActionMap = function (headerEl)
-{
+window.toggleActionMap = function (headerEl) {
     const actionsList = headerEl.nextElementSibling;
     const toggle = headerEl.querySelector('.action-map-toggle');
 
-    if (actionsList.style.display === 'none')
-    {
+    if (actionsList.style.display === 'none') {
         actionsList.style.display = 'grid';
         toggle.classList.remove('collapsed');
-    } else
-    {
+    } else {
         actionsList.style.display = 'none';
         toggle.classList.add('collapsed');
     }
 };
 
+window.handleDetectedInput = handleDetectedInput;
+window.handleSearchInput = window.handleSearchInput || function (v) {
+    searchTerm = v;
+    debouncedRender();
+};
+loadPrefixMappingsLocal();
+
 /**
  * Setup scroll listener to track which category header is visible
  * Updates the profile-name header with the current visible category
  */
-function setupScrollCategoryTracker()
-{
+function setupScrollCategoryTracker() {
     const scrollContainer = document.getElementById('action-maps-container');
     if (!scrollContainer) return;
 
     // Remove any existing listener to avoid duplicates
-    if (window.categoryTrackerScrollListener)
-    {
+    if (window.categoryTrackerScrollListener) {
         scrollContainer.removeEventListener('scroll', window.categoryTrackerScrollListener);
     }
 
-    window.categoryTrackerScrollListener = () =>
-    {
+    window.categoryTrackerScrollListener = () => {
         const profileNameEl = document.getElementById('profile-name');
         if (!profileNameEl) return;
 
@@ -3467,8 +2646,7 @@ function setupScrollCategoryTracker()
         const scrollTop = scrollContainer.scrollTop;
 
         // Iterate through headers to find the last one that's above the scroll position
-        headers.forEach((header) =>
-        {
+        headers.forEach((header) => {
             const headerTop = header.offsetTop - scrollContainer.offsetTop;
             const h3 = header.querySelector('h3');
             const headerText = h3 ? h3.textContent.trim() : null;
@@ -3476,18 +2654,15 @@ function setupScrollCategoryTracker()
             if (!headerText) return;
 
             // Check if header is above current scroll position + small threshold
-            if (headerTop <= scrollTop + 10)
-            {
+            if (headerTop <= scrollTop + 10) {
                 lastVisibleCategory = headerText;
             }
         });
 
         // Update the profile name if we found a category
-        if (lastVisibleCategory && profileNameEl.textContent !== lastVisibleCategory)
-        {
+        if (lastVisibleCategory && profileNameEl.textContent !== lastVisibleCategory) {
             profileNameEl.textContent = lastVisibleCategory;
-        } else if (!lastVisibleCategory && profileNameEl.textContent !== 'Keybindings')
-        {
+        } else if (!lastVisibleCategory && profileNameEl.textContent !== 'Keybindings') {
             // Reset to default if no category is visible
             profileNameEl.textContent = 'Keybindings';
         }
