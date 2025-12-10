@@ -104,11 +104,13 @@ async function refreshDeviceList()
         let joystickCount = 0;
         let gamepadCount = 0;
 
-        devices.forEach((device) =>
+        // Pass 'index' to handle identical devices (0, 1, 2...)
+        devices.forEach((device, index) =>
         {
             const isGp = device.device_type === 'Gamepad';
             const categoryIndex = isGp ? ++gamepadCount : ++joystickCount;
-            const deviceCard = createDeviceCard(device, categoryIndex, isGp);
+            // Pass the index to createDeviceCard
+            const deviceCard = createDeviceCard(device, categoryIndex, isGp, index);
             deviceListContainer.appendChild(deviceCard);
         });
 
@@ -123,7 +125,8 @@ async function refreshDeviceList()
     }
 }
 
-function createDeviceCard(device, categoryIndex, isGp)
+// Fixed ID Generation to prevent collisions on identical devices
+function createDeviceCard(device, categoryIndex, isGp, uniqueIndex)
 {
     const card = document.createElement('div');
     card.className = 'dm-device-card';
@@ -133,10 +136,23 @@ function createDeviceCard(device, categoryIndex, isGp)
     const statusClass = device.is_connected ? 'connected' : 'disconnected';
     const deviceEmoji = isGp ? '🎮' : '🕹️';
 
-    // Use device UUID if available, otherwise create a stable identifier
-    const deviceUuid = device.uuid || generateDeviceIdentifier(device);
+    // -------------------------------------------------------------------------
+    // CRITICAL FIX: Always make UUID unique by appending the sorting index.
+    // This allows identical devices (same UUID) to have separate settings.
+    // -------------------------------------------------------------------------
+    let deviceUuid = device.uuid;
 
-    // Get saved prefix for this device
+    if (deviceUuid) {
+        // If backend provides a UUID, append index to guarantee uniqueness in UI
+        // e.g. "10F5:7055" becomes "10F5:7055-idx0"
+        deviceUuid = `${deviceUuid}-idx${uniqueIndex}`;
+    } else {
+        // Fallback generator (already includes index logic)
+        deviceUuid = generateDeviceIdentifier(device, uniqueIndex);
+    }
+    // -------------------------------------------------------------------------
+
+    // Get saved prefix for this device using the UNIQUE ID
     const savedPrefix = devicePrefixMapping[deviceUuid] || '';
 
     console.log(`[DEVICE-MANAGER] Device card created:`, {
@@ -268,25 +284,41 @@ function handlePrefixChange(deviceUuid, prefix, deviceName, autoDetectedId)
 
 /**
  * Generates a stable device identifier from device properties
- * Uses: vendor_id + product_id + serial_number (if available) + device name
+ * Uses: path (if available) OR vendor_id + product_id + serial_number + index
  * This ensures the same physical device gets the same ID across sessions
  */
-function generateDeviceIdentifier(device)
+function generateDeviceIdentifier(device, uniqueIndex)
 {
-    // Try to use hardware identifiers first
+    // 1. Prefer Hardware Path if available (Operating System location)
+    if (device.path)
+    {
+        return `path-${device.path}`;
+    }
+
+    // 2. Build the hardware ID
+    let baseId = '';
     if (device.vendor_id && device.product_id)
     {
         const serial = device.serial_number || 'nosn';
-        const id = `${device.vendor_id}-${device.product_id}-${serial}`;
-        console.log(`[DEVICE-MANAGER] Generated hardware ID: ${id}`);
-        return id;
+        baseId = `${device.vendor_id}-${device.product_id}-${serial}`;
+    } else
+    {
+        // Fallback to name hash
+        const nameHash = hashString(device.name);
+        baseId = `name-${nameHash}`;
     }
 
-    // Fallback to device name hash if no hardware IDs available
-    const nameHash = hashString(device.name);
-    const id = `name-${nameHash}`;
-    console.log(`[DEVICE-MANAGER] Generated name-based ID: ${id} (from "${device.name}")`);
-    return id;
+    // 3. Append index if serial is missing or we are forcing index usage
+    // This distinguishes identical sticks (same VID/PID, no SN)
+    if (baseId.includes('nosn') || uniqueIndex !== undefined)
+    {
+        const uniqueId = `${baseId}-idx${uniqueIndex}`;
+        console.log(`[DEVICE-MANAGER] Generated Unique ID (with index): ${uniqueId}`);
+        return uniqueId;
+    }
+
+    console.log(`[DEVICE-MANAGER] Generated ID: ${baseId}`);
+    return baseId;
 }
 
 /**

@@ -105,8 +105,8 @@ async function loadDeviceAxisNames()
                         // Build SC axis mapping from HID data
                         if (Object.keys(axisMapping || {}).length > 0 && Object.keys(axisNames || {}).length > 0)
                         {
-                            // Note: buildAxisMappingFromHID is not defined in main.js or imported. 
-                            // It seems it was missing from main.js or I missed it. 
+                            // Note: buildAxisMappingFromHID is not defined in main.js or imported.
+                            // It seems it was missing from main.js or I missed it.
                             // Checking main.js content again... it was called but not defined in the provided text?
                             // Ah, I might have missed it in the read. Or it's imported?
                             // Wait, I don't see buildAxisMappingFromHID in main.js content I read.
@@ -114,7 +114,7 @@ async function loadDeviceAxisNames()
                             // Maybe it was defined inside loadDeviceAxisNames? No.
                             // I will comment it out for now and add a TODO.
                             // console.warn('buildAxisMappingFromHID is missing');
-                            // const scAxisMapping = {}; 
+                            // const scAxisMapping = {};
                         }
                     } catch (mappingError)
                     {
@@ -137,6 +137,61 @@ async function loadDeviceAxisNames()
     }
 }
 
+
+/**
+ * Generates a stable device identifier from device properties
+ * Uses: path (if available) OR vendor_id + product_id + serial_number + index
+ * This ensures the same physical device gets the same ID across sessions
+ * COPIED FROM device_manager.js to ensure consistency
+ */
+function generateDeviceIdentifier(device, uniqueIndex)
+{
+    // 1. Prefer Hardware Path if available (Operating System location)
+    if (device.path)
+    {
+        return `path-${device.path}`;
+    }
+
+    // 2. Build the hardware ID
+    let baseId = '';
+    if (device.vendor_id && device.product_id)
+    {
+        const serial = device.serial_number || 'nosn';
+        baseId = `${device.vendor_id}-${device.product_id}-${serial}`;
+    } else
+    {
+        // Fallback to name hash
+        const nameHash = hashString(device.name);
+        baseId = `name-${nameHash}`;
+    }
+
+    // 3. Append index if serial is missing or we are forcing index usage
+    // This distinguishes identical sticks (same VID/PID, no SN)
+    if (baseId.includes('nosn') || uniqueIndex !== undefined)
+    {
+        const uniqueId = `${baseId}-idx${uniqueIndex}`;
+        console.log(`[KEYBINDINGS] Generated Unique ID (with index): ${uniqueId}`);
+        return uniqueId;
+    }
+
+    return baseId;
+}
+
+/**
+ * Simple string hash function for device names
+ */
+function hashString(str)
+{
+    let hash = 0;
+    for (let i = 0; i < str.length; i++)
+    {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(36);
+}
+
 /**
  * Build device UUID to auto-detected prefix mapping
  * This ensures keybindings page uses the same device enumeration order as device manager
@@ -155,16 +210,28 @@ async function buildDeviceUuidMapping()
         let joystickCount = 0;
         let gamepadCount = 0;
 
-        devices.forEach((device) =>
+        // UPDATED: Added index to loop to match device_manager.js logic
+        devices.forEach((device, index) =>
         {
             const isGp = device.device_type === 'Gamepad';
             const categoryIndex = isGp ? ++gamepadCount : ++joystickCount;
             const autoDetectedId = isGp ? `gp${categoryIndex}` : `js${categoryIndex}`;
 
-            if (device.uuid)
+            // UPDATED: Use the same ID generation logic as device_manager.js
+            let deviceUuid = device.uuid;
+            if (deviceUuid) {
+                // If backend provides a UUID, append index to guarantee uniqueness in UI
+                // e.g. "10F5:7055" becomes "10F5:7055-idx0"
+                deviceUuid = `${deviceUuid}-idx${index}`;
+            } else {
+                // Fallback generator (already includes index logic)
+                deviceUuid = generateDeviceIdentifier(device, index);
+            }
+
+            if (deviceUuid)
             {
-                deviceUuidToAutoPrefix[device.uuid] = autoDetectedId;
-                console.log(`[KEYBINDINGS] Mapped UUID ${device.uuid} -> ${autoDetectedId} (${device.name})`);
+                deviceUuidToAutoPrefix[deviceUuid] = autoDetectedId;
+                console.log(`[KEYBINDINGS] Mapped UUID ${deviceUuid} -> ${autoDetectedId} (${device.name})`);
             }
         });
 
@@ -2702,7 +2769,6 @@ async function fallbackResetBinding()
         if (window.showAlert) await window.showAlert(`Error resetting binding: ${error}`, 'Error');
     }
 }
-
 // Make startBinding available globally
 window.startBinding = startBinding;
 window.cancelBinding = cancelBinding;
@@ -2710,49 +2776,63 @@ window.clearBinding = clearBinding;
 window.closeBindingModal = closeBindingModal;
 window.resetBinding = resetBinding;
 
-// Binding detection and conflict handling helpers
 function applyJoystickMapping(inputString, deviceUuid)
 {
-    console.log(`[KEYBINDINGS] applyJoystickMapping called with:`, {
-        inputString,
-        deviceUuid,
-        hasAutoMapping: !!deviceUuidToAutoPrefix[deviceUuid],
-        autoPrefix: deviceUuidToAutoPrefix[deviceUuid]
-    });
-
-    // Extract the backend-assigned prefix from the input (e.g., "js1" from "js1_button3")
+    // Extract the backend-assigned prefix (e.g., "js1", "gp2")
     const match = inputString.match(/^(js|gp)(\d+)_/);
     if (!match)
     {
-        console.log(`[KEYBINDINGS] No device prefix found in input: ${inputString}`);
         return inputString;
     }
 
-    const backendPrefix = match[1] + match[2]; // e.g., "js1"
+    const deviceType = match[1]; // "js" or "gp"
+    const deviceNum = parseInt(match[2]); // 1, 2, 3...
 
-    // Step 1: Map backend prefix to auto-detected prefix using UUID
-    // The backend may assign devices in any order, but we need the "correct" order
-    let autoDetectedPrefix = backendPrefix; // Default to backend prefix
+    // Calculate the 0-based index this input corresponds to
+    // (e.g., js1 -> index 0, js2 -> index 1)
+    const calculatedIndex = deviceNum - 1;
 
-    if (deviceUuid && deviceUuidToAutoPrefix[deviceUuid])
+    let effectiveUuid = deviceUuid;
+
+    // CRITICAL FIX: Handle Identical Devices
+    // The backend sends a raw UUID (e.g., "1234-5678-nosn").
+    // But our mapping tables use Indexed UUIDs (e.g., "1234-5678-nosn-idx1") for uniqueness.
+    // If the raw UUID isn't found, we try to reconstruct the Indexed UUID based on the input number.
+    if (deviceUuid && !deviceUuidToAutoPrefix[deviceUuid])
     {
-        autoDetectedPrefix = deviceUuidToAutoPrefix[deviceUuid];
-        console.log(`[KEYBINDINGS] UUID ${deviceUuid} mapped backend prefix ${backendPrefix} -> auto-detected ${autoDetectedPrefix}`);
-    }
-    else if (deviceUuid)
-    {
-        console.warn(`[KEYBINDINGS] UUID ${deviceUuid} not found in auto-prefix mapping. Using backend prefix ${backendPrefix}.`);
-        console.warn(`[KEYBINDINGS] Available UUIDs:`, Object.keys(deviceUuidToAutoPrefix));
+        // Try appending the index derived from the input string (js2 -> idx1)
+        const indexedUuid = `${deviceUuid}-idx${calculatedIndex}`;
+
+        if (deviceUuidToAutoPrefix[indexedUuid])
+        {
+            console.log(`[KEYBINDINGS] inferred Indexed UUID: ${indexedUuid} (from ${inputString})`);
+            effectiveUuid = indexedUuid;
+        }
     }
 
-    // Step 2: Check if there's a custom prefix override from device manager
+    // Step 1: Map backend prefix to auto-detected prefix
+    let autoDetectedPrefix = match[0].replace('_', ''); // Default to self (e.g., "js2")
+
+    if (effectiveUuid && deviceUuidToAutoPrefix[effectiveUuid])
+    {
+        autoDetectedPrefix = deviceUuidToAutoPrefix[effectiveUuid];
+        // Only log if it's actually different to avoid spam
+        if (autoDetectedPrefix !== match[0].replace('_', '')) {
+            console.log(`[KEYBINDINGS] Mapped ${inputString} (${effectiveUuid}) -> Auto-ID ${autoDetectedPrefix}`);
+        }
+    }
+
+    // Step 2: Check for custom User Override (from Device Manager)
     let finalPrefix = autoDetectedPrefix;
 
-    if (window.applyDevicePrefixOverride && deviceUuid)
+    if (window.applyDevicePrefixOverride && effectiveUuid)
     {
-        // Create a temporary input string with the auto-detected prefix to check for overrides
+        // Create a temp input using the Auto-Detected ID (e.g., "js1_x")
+        // This ensures the override logic sees the "Card ID", not the "Backend ID"
         const tempInput = inputString.replace(/^(js|gp)\d+_/, `${autoDetectedPrefix}_`);
-        const overriddenInput = window.applyDevicePrefixOverride(tempInput, deviceUuid);
+
+        // Pass the effective (indexed) UUID to the override function
+        const overriddenInput = window.applyDevicePrefixOverride(tempInput, effectiveUuid);
 
         if (overriddenInput !== tempInput)
         {
@@ -2760,21 +2840,17 @@ function applyJoystickMapping(inputString, deviceUuid)
             if (overrideMatch)
             {
                 finalPrefix = overrideMatch[1];
-                console.log(`[KEYBINDINGS] Applied custom prefix override: ${autoDetectedPrefix} -> ${finalPrefix}`);
+                console.log(`[KEYBINDINGS] Applied Override: ${autoDetectedPrefix} -> ${finalPrefix}`);
             }
         }
     }
 
-    // Apply the final prefix
+    // Apply the final prefix to the input string
     const mappedInput = inputString.replace(/^(js|gp)\d+_/, `${finalPrefix}_`);
-
-    if (mappedInput !== inputString)
-    {
-        console.log(`[KEYBINDINGS] ✓ Final mapping: ${inputString} -> ${mappedInput}`);
-    }
 
     return mappedInput;
 }
+
 
 async function setPendingBindingSelection(processedInput)
 {
@@ -3290,6 +3366,13 @@ async function swapJoystickPrefixes()
         if (window.showAlert) await window.showAlert(`Error swapping prefixes: ${error}`, 'Error');
     }
 }
+
+// Make startBinding available globally
+window.startBinding = startBinding;
+window.cancelBinding = cancelBinding;
+window.clearBinding = clearBinding;
+window.closeBindingModal = closeBindingModal;
+window.resetBinding = resetBinding;
 
 // Make action map functions globally available
 window.clearAllActionMapBindings = clearAllActionMapBindings;

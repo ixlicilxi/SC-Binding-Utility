@@ -1924,8 +1924,8 @@ function searchBindings(buttonIdentifier)
                     {
                         isMatch = true;
                     }
-                    // For axis bindings, also try matching just the axis name (to handle default bindings)
-                    // Default bindings from AllBinds.xml are hardcoded to js1_ in the backend,
+                        // For axis bindings, also try matching just the axis name (to handle default bindings)
+                        // Default bindings from AllBinds.xml are hardcoded to js1_ in the backend,
                     // but they should apply to all joystick instances
                     else if (inputString && inputString.match(/_(?:x|y|z|rotx|roty|rotz|slider1|slider2)$/))
                     {
@@ -1939,7 +1939,7 @@ function searchBindings(buttonIdentifier)
                             isMatch = true;
                         }
                     }
-                    // Match by button number - BUT ONLY FOR ACTUAL BUTTONS, NOT AXES
+                        // Match by button number - BUT ONLY FOR ACTUAL BUTTONS, NOT AXES
                     // This prevents "axis2" from incorrectly matching "button2"
                     else if (buttonNum !== null)
                     {
@@ -2028,19 +2028,17 @@ function findAllBindingsForHatDirection(hat, direction)
 function getCanvasCoords(event)
 {
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    // const dpr = window.devicePixelRatio || 1; // Removed: not needed for hit detection logic
 
-    // Convert screen coordinates to canvas coordinates
+    // Convert screen coordinates to canvas coordinates (CSS pixels)
     const canvasX = (event.clientX - rect.left);
     const canvasY = (event.clientY - rect.top);
 
-    // Reverse the DPR scaling
-    const scaledX = canvasX / dpr;
-    const scaledY = canvasY / dpr;
-
     // Reverse the pan and zoom transformations
-    const imgX = (scaledX - pan.x) / zoom;
-    const imgY = (scaledY - pan.y) / zoom;
+    // Note: Do NOT divide by DPR here because clientX/Y are in CSS pixels, and
+    // our transform logic (pan/zoom) operates in that same CSS pixel space.
+    const imgX = (canvasX - pan.x) / zoom;
+    const imgY = (canvasY - pan.y) / zoom;
 
     return { x: imgX, y: imgY };
 }
